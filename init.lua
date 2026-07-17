@@ -21,9 +21,9 @@ local Window = WindUI:CreateWindow({
 		),
 	},
 	Topbar = {
-		DisableTopbarButtons = { "Minimize" },
+		Height = 44,
 	},
-
+	DisableTopbarButtons = { "Minimize" },
 })
 
 local MainTab = Window:Tab({
