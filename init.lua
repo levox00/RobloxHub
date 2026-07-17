@@ -129,34 +129,58 @@ end)
 local flyEnabled = false
 local flySpeed = 50
 local flyConn
-
-UtilsTab:Slider({
-	Title = "Fly Speed",
-	Step = 1,
-	Value = {
-		Min = 10,
-		Max = 300,
-		Default = 50,
-	},
-	Callback = function(value)
-		flySpeed = value
-	end,
-})
+local flyAttach, flyAlignPos, flyAlignOri
 
 local function startFly()
 	if flyConn then flyConn:Disconnect() flyConn = nil end
 
-	flyConn = RunService.RenderStepped:Connect(function(dt)
+	local ok, char = pcall(function()
+		return LocalPlayer.Character
+	end)
+	if not ok or not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not humanoid then return end
+
+	humanoid.PlatformStand = true
+	humanoid.AutoRotate = false
+
+	flyAttach = Instance.new("Attachment")
+	flyAttach.Name = "FlyAttachment"
+	flyAttach.Parent = hrp
+
+	flyAlignPos = Instance.new("AlignPosition")
+	flyAlignPos.Name = "FlyPosition"
+	flyAlignPos.Mode = Enum.PositionAlignmentMode.OneAttachment
+	flyAlignPos.Attachment0 = flyAttach
+	flyAlignPos.Position = hrp.Position
+	flyAlignPos.RigidityEnabled = false
+	flyAlignPos.ReactionForceEnabled = false
+	flyAlignPos.MaxForce = 1e5
+	flyAlignPos.MaxVelocity = 1e4
+	flyAlignPos.Responsiveness = 50
+	flyAlignPos.Parent = hrp
+
+	flyAlignOri = Instance.new("AlignOrientation")
+	flyAlignOri.Name = "FlyOrientation"
+	flyAlignOri.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	flyAlignOri.Attachment0 = flyAttach
+	flyAlignOri.CFrame = workspace.CurrentCamera.CFrame
+	flyAlignOri.RigidityEnabled = false
+	flyAlignOri.ReactionTorqueEnabled = false
+	flyAlignOri.MaxTorque = 1e5
+	flyAlignOri.MaxAngularVelocity = 1e4
+	flyAlignOri.Responsiveness = 50
+	flyAlignOri.Parent = hrp
+
+	flyConn = RunService.Heartbeat:Connect(function(dt)
 		if not flyEnabled then return end
-		local ok, char = pcall(function()
+		local ok2, char2 = pcall(function()
 			return LocalPlayer.Character
 		end)
-		if not ok or not char then return end
-		local hrp = char:FindFirstChild("HumanoidRootPart")
-		local humanoid = char:FindFirstChildOfClass("Humanoid")
-		if not hrp or not humanoid then return end
-
-		humanoid.PlatformStand = true
+		if not ok2 or not char2 then return end
+		local hrp2 = char2:FindFirstChild("HumanoidRootPart")
+		if not hrp2 or not flyAlignPos or not flyAlignOri then return end
 
 		local cam = workspace.CurrentCamera
 		if not cam then return end
@@ -184,16 +208,21 @@ local function startFly()
 
 		if dir.Magnitude > 0 then
 			dir = dir.Unit
-			hrp.CFrame = hrp.CFrame + dir * flySpeed * dt
 		end
 
-		hrp.Velocity = Vector3.zero
-		hrp.RotVelocity = Vector3.zero
+		flyAlignPos.Position = hrp2.Position + dir * flySpeed * dt
+		flyAlignOri.CFrame = camCF
+
+		hrp2.AssemblyLinearVelocity = dir * flySpeed * 0.1
+		hrp2.AssemblyAngularVelocity = Vector3.zero
 	end)
 end
 
 local function stopFly()
 	if flyConn then flyConn:Disconnect() flyConn = nil end
+	if flyAlignPos then pcall(function() flyAlignPos:Destroy() end) flyAlignPos = nil end
+	if flyAlignOri then pcall(function() flyAlignOri:Destroy() end) flyAlignOri = nil end
+	if flyAttach then pcall(function() flyAttach:Destroy() end) flyAttach = nil end
 
 	local ok, char = pcall(function()
 		return LocalPlayer.Character
@@ -202,12 +231,13 @@ local function stopFly()
 		local humanoid = char:FindFirstChildOfClass("Humanoid")
 		if humanoid then
 			humanoid.PlatformStand = false
+			humanoid.AutoRotate = true
 			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 		end
 		local hrp = char:FindFirstChild("HumanoidRootPart")
 		if hrp then
-			hrp.Velocity = Vector3.zero
-			hrp.RotVelocity = Vector3.zero
+			hrp.AssemblyLinearVelocity = Vector3.zero
+			hrp.AssemblyAngularVelocity = Vector3.zero
 		end
 	end
 end
@@ -279,6 +309,6 @@ else
 	HubsTab:Button({
 		Title = "No scripts found",
 		Desc = "Add scripts to loadstrings.lua",
-		Locked = "Locked",
+		Locked = true,
 	})
 end
