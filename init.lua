@@ -274,7 +274,7 @@ local HubsTab = Window:Tab({
 	Icon = "solar:folder-with-files-bold",
 })
 
-local REPO_BRANCH = "game/gag2-hub-integration"
+local REPO_BRANCH = "main"
 local cacheBuster = "?v=" .. math.random(1, 999999)
 
 local loadSuccess, scriptsList = pcall(function()
