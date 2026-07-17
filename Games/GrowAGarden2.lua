@@ -1,8 +1,9 @@
 --[[
-	PussyHub — Grow a Garden 2 Module
-	WindUI-integrated version: adds tabs/features into the hub window.
-	Receives `Window` and `WindUI` from the hub loader.
+	PussyHub — Grow a Garden 2
+	Standalone WindUI window. Loaded via loadstrings.lua.
 ]]
+
+print("[GAG2] Loading...")
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -12,19 +13,60 @@ local WS = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 local RS = game:GetService("ReplicatedStorage")
 local GuiService = game:GetService("GuiService")
-local RunService = game:GetService("RunService")
 
 local P = Players.LocalPlayer
 if not P then P = Players.PlayerAdded:Wait() end
 
-local Window = getgenv().PussyHub_Window
-local WindUI = getgenv().PussyHub_WindUI
-if not Window or not WindUI then
-	warn("[GAG2] Missing Window/WindUI — load via hub")
-	return
-end
+------------------------------------------------------------------------
+-- WindUI
+------------------------------------------------------------------------
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
-print("[GAG2] Loading GAG2 features into hub...")
+WindUI:AddTheme({
+	Name = "GAG2",
+	Accent = Color3.fromHex("#00e5ff"),
+	Dialog = Color3.fromHex("#070d33"),
+	Outline = Color3.fromHex("#b0c4de"),
+	Text = Color3.fromHex("#dce4f0"),
+	Placeholder = Color3.fromHex("#6878a0"),
+	Background = Color3.fromHex("#050a1a"),
+	Button = Color3.fromHex("#1a2a5e"),
+	Icon = Color3.fromHex("#8fa8cc"),
+	Toggle = Color3.fromHex("#6fa8dc"),
+	Slider = Color3.fromHex("#5b8ec9"),
+	Checkbox = Color3.fromHex("#6fa8dc"),
+	PanelBackground = Color3.fromHex("#0e1a3a"),
+	PanelBackgroundTransparency = 0.1,
+	SliderIcon = Color3.fromHex("#7b9ec9"),
+	Primary = Color3.fromHex("#00e5ff"),
+	LabelBackground = Color3.fromHex("#080e28"),
+	LabelBackgroundTransparency = 0.5,
+	ElementBackground = Color3.fromHex("#0f1c40"),
+	ElementBackgroundTransparency = 0,
+})
+
+local Window = WindUI:CreateWindow({
+	Title = "Grow a Garden 2",
+	Icon = "solar:leaf-bold",
+	Folder = "GAG2",
+	Size = UDim2.fromOffset(580, 460),
+	Theme = "GAG2",
+	OpenButton = {
+		Title = "GAG2",
+		CornerRadius = UDim.new(1, 0),
+		StrokeThickness = 3,
+		Enabled = true,
+		Draggable = true,
+		Scale = 0.5,
+		Color = ColorSequence.new(
+			Color3.fromHex("#00e5ff"),
+			Color3.fromHex("#7b2ff7")
+		),
+	},
+})
+
+if not Window then warn("[GAG2] CreateWindow failed") return end
+pcall(function() Window:DisableTopbarButtons({ "Minimize" }) end)
 
 ------------------------------------------------------------------------
 -- CONFIG
@@ -272,7 +314,7 @@ local function getMyHarvestTargets()
 end
 
 local function DoHarvest(quiet)
-	local ok, err = pcall(function()
+	pcall(function()
 		local targets = getMyHarvestTargets()
 		if #targets == 0 then return end
 		local h = 0
@@ -291,7 +333,7 @@ local function DoHarvest(quiet)
 end
 
 ------------------------------------------------------------------------
--- SELL (FIXED: NPC selection + dialog detection)
+-- SELL (FIXED)
 ------------------------------------------------------------------------
 local SELL_NPC_ORDER = {"Steven", "Sam", "Charlotte", "Gilbert"}
 
@@ -342,7 +384,7 @@ local function findDialogGui()
 	for _, gui in pairs(P.PlayerGui:GetChildren()) do
 		if gui:IsA("ScreenGui") and gui.Enabled then
 			local gn = gui.Name:lower()
-			if gn:find("dialog") or (gn:find("npc") and not gn:find("pussyhub") and not gn:find("miku")) then
+			if gn:find("dialog") or (gn:find("npc") and not gn:find("gag2")) then
 				return gui
 			end
 		end
@@ -394,7 +436,7 @@ local function pressTeleportSellButton()
 end
 
 local function DoSell()
-	local ok, err = pcall(function()
+	pcall(function()
 		local items = getInventoryWithValues()
 		local fc = getFruitCount()
 		if #items == 0 and fc == 0 then return end
@@ -422,7 +464,6 @@ local function DoSell()
 			firePrompt(prompt)
 		end
 
-		local clicked = false
 		for attempt = 1, 10 do
 			task.wait(0.45)
 			local gear = P.PlayerGui:FindFirstChild("GearShop")
@@ -435,14 +476,12 @@ local function DoSell()
 				break
 			end
 			if findDialogGui() then
-				clicked = clickSellAllButton()
-				if clicked then
-					for chain = 1, 3 do
-						task.wait(0.5)
-						if findDialogGui() then clickSellAllButton() else break end
-					end
-					break
+				clickSellAllButton()
+				for chain = 1, 3 do
+					task.wait(0.5)
+					if findDialogGui() then clickSellAllButton() else break end
 				end
+				break
 			end
 		end
 
@@ -631,23 +670,19 @@ local function TeleportToSellStand()
 end
 
 ------------------------------------------------------------------------
--- PERFORMANCE
+-- PERF / ESP
 ------------------------------------------------------------------------
 local function ApplyPerfMode(enabled)
 	pcall(function()
 		if enabled then
 			pcall(function() settings().Rendering.QualityLevel = 1 end)
-			Lighting.GlobalShadows = false
-			Lighting.FogEnd = 999999
-			Lighting.Brightness = 0
+			Lighting.GlobalShadows = false; Lighting.FogEnd = 999999; Lighting.Brightness = 0
 			for _, v in pairs(Lighting:GetChildren()) do
 				if v:IsA("PostEffect") then v.Enabled = false end
 			end
 		else
 			pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level09 end)
-			Lighting.GlobalShadows = true
-			Lighting.FogEnd = 100000
-			Lighting.Brightness = 2
+			Lighting.GlobalShadows = true; Lighting.FogEnd = 100000; Lighting.Brightness = 2
 			for _, v in pairs(Lighting:GetChildren()) do
 				if v:IsA("PostEffect") then v.Enabled = true end
 			end
@@ -655,25 +690,6 @@ local function ApplyPerfMode(enabled)
 	end)
 end
 
-local function DebugRemotes()
-	local found = 0
-	local function scan2(v, path, depth)
-		if found >= 60 or depth > 8 then return end
-		for _, c in pairs(v:GetChildren()) do
-			if found >= 60 then return end
-			if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
-				found = found + 1
-			end
-			scan2(c, path .. "." .. c.Name, depth + 1)
-		end
-	end
-	scan2(RS, "RS", 0)
-	WindUI:Notify({Title = "GAG2 Remotes", Content = found .. " remotes found", Duration = 3})
-end
-
-------------------------------------------------------------------------
--- ESP
-------------------------------------------------------------------------
 local espObjs = {}
 local function clearESP()
 	for _, e in pairs(espObjs) do pcall(function() e:Destroy() end) end
@@ -754,29 +770,24 @@ end
 ------------------------------------------------------------------------
 -- WINDUI TABS
 ------------------------------------------------------------------------
-
--- AUTO TAB
-local AutoTab = Window:Tab({Title = "Auto (GAG2)", Icon = "solar:autoplay-bold"})
-local AutoSection = AutoTab:Section({Title = "Master"})
-AutoTab:Toggle({Title = "AUTO PROGRESS", Desc = "Master toggle for all automation", Callback = function(v)
+local AutoTab = Window:Tab({Title = "Auto", Icon = "solar:autoplay-bold"})
+AutoTab:Section({Title = "Master"})
+AutoTab:Toggle({Title = "AUTO PROGRESS", Desc = "Master toggle", Callback = function(v)
 	CFG.AutoProgress = v
-	WindUI:Notify({Title = "GAG2", Content = v and "Auto progress enabled" or "Auto progress paused", Duration = 3})
+	WindUI:Notify({Title = "GAG2", Content = v and "Auto enabled" or "Auto paused", Duration = 3})
 end})
-
-local AutoFeatures = AutoTab:Section({Title = "Features"})
-AutoTab:Toggle({Title = "Auto Harvest", Desc = "Collect ready fruits", Value = true, Callback = function(v) CFG.AutoHarvest = v end})
-AutoTab:Toggle({Title = "Auto Sell", Desc = "Sell every cycle", Callback = function(v) CFG.AutoSell = v end})
-AutoTab:Toggle({Title = "Sell When Full", Desc = "Auto sell at inventory limit", Value = true, Callback = function(v) CFG.AutoSellWhenFull = v end})
-AutoTab:Toggle({Title = "Auto Collect", Desc = "Pick up sheckles/drops", Value = true, Callback = function(v) CFG.AutoCollect = v end})
-AutoTab:Toggle({Title = "Spoof Mode", Desc = "Remote fire without teleporting", Value = true, Callback = function(v) CFG.SpoofMode = v end})
+AutoTab:Section({Title = "Features"})
+AutoTab:Toggle({Title = "Auto Harvest", Value = true, Callback = function(v) CFG.AutoHarvest = v end})
+AutoTab:Toggle({Title = "Auto Sell", Callback = function(v) CFG.AutoSell = v end})
+AutoTab:Toggle({Title = "Sell When Full", Value = true, Callback = function(v) CFG.AutoSellWhenFull = v end})
+AutoTab:Toggle({Title = "Auto Collect", Value = true, Callback = function(v) CFG.AutoCollect = v end})
+AutoTab:Toggle({Title = "Spoof Mode", Value = true, Callback = function(v) CFG.SpoofMode = v end})
 AutoTab:Toggle({Title = "Sell: Teleport to NPC", Value = true, Callback = function(v) CFG.SellTeleport = v end})
-
-local AutoTuning = AutoTab:Section({Title = "Tuning"})
+AutoTab:Section({Title = "Tuning"})
 AutoTab:Slider({Title = "Per-Plant Delay", Step = 0.01, Value = {Min = 0.01, Max = 0.5, Default = 0.05}, Callback = function(v) CFG.HarvestDelay = v end})
 AutoTab:Slider({Title = "Full Inventory At", Step = 1, Value = {Min = 2, Max = 50, Default = 10}, Callback = function(v) CFG.FullInventoryThreshold = v end})
-
-local AutoActions = AutoTab:Section({Title = "Actions"})
-AutoTab:Button({Title = "Harvest Now (value order)", Callback = function() task.spawn(DoHarvest) end})
+AutoTab:Section({Title = "Actions"})
+AutoTab:Button({Title = "Harvest Now", Callback = function() task.spawn(DoHarvest) end})
 AutoTab:Button({Title = "Sell Now", Callback = function() task.spawn(DoSell) end})
 AutoTab:Button({Title = "Scan Garden", Callback = function()
 	local plot = getMyGarden()
@@ -789,16 +800,14 @@ AutoTab:Button({Title = "Scan Garden", Callback = function()
 	end
 end})
 
--- STEAL TAB
 local StealTab = Window:Tab({Title = "Steal", Icon = "solar:thief-bold"})
 StealTab:Toggle({Title = "Auto Steal (night only)", Callback = function(v) CFG.AutoSteal = v end})
 StealTab:Button({Title = "Find Stealable", Callback = function()
 	local targets = getStealTargets()
 	WindUI:Notify({Title = "GAG2", Content = #targets .. " stealable fruits", Duration = 3})
 end})
-StealTab:Button({Title = "Steal Now (force night)", Callback = function() task.spawn(function() DoSteal(true) end) end})
+StealTab:Button({Title = "Steal Now (force)", Callback = function() task.spawn(function() DoSteal(true) end) end})
 
--- PLAYER TAB
 local PlayerTab = Window:Tab({Title = "Player", Icon = "solar:user-bold"})
 PlayerTab:Slider({Title = "Walk Speed", Step = 1, Value = {Min = 16, Max = 500, Default = 80}, Callback = function(v) CFG.WalkSpeed = v end})
 PlayerTab:Slider({Title = "Jump Power", Step = 1, Value = {Min = 50, Max = 500, Default = 120}, Callback = function(v) CFG.JumpPower = v end})
@@ -821,22 +830,18 @@ PlayerTab:Toggle({Title = "Noclip", Callback = function(v)
 	if not v then
 		pcall(function()
 			local c = P.Character
-			if c then
-				for _, part in pairs(c:GetDescendants()) do
-					if part:IsA("BasePart") then part.CanCollide = true end
-				end
-			end
+			if c then for _, part in pairs(c:GetDescendants()) do
+				if part:IsA("BasePart") then part.CanCollide = true end
+			end end
 		end)
 	end
 end})
 
--- ESP TAB
 local ESPTab = Window:Tab({Title = "ESP", Icon = "solar:eye-bold"})
-ESPTab:Toggle({Title = "Plant ESP (my garden)", Callback = function(v) CFG.PlantESP = v end})
-ESPTab:Toggle({Title = "Steal ESP (other gardens)", Callback = function(v) CFG.StealESP = v end})
-ESPTab:Toggle({Title = "Value ESP (fruit prices)", Callback = function(v) CFG.ValueESP = v end})
+ESPTab:Toggle({Title = "Plant ESP", Callback = function(v) CFG.PlantESP = v end})
+ESPTab:Toggle({Title = "Steal ESP", Callback = function(v) CFG.StealESP = v end})
+ESPTab:Toggle({Title = "Value ESP", Callback = function(v) CFG.ValueESP = v end})
 
--- TELEPORT TAB
 local TPTab = Window:Tab({Title = "Teleport", Icon = "solar:map-arrow-up-bold"})
 TPTab:Button({Title = "My Garden", Callback = TeleportToMyGarden})
 TPTab:Button({Title = "Sell Stand", Callback = TeleportToSellStand})
@@ -846,17 +851,15 @@ TPTab:Button({Title = "Charlotte", Callback = function() TeleportToNPC("Charlott
 TPTab:Button({Title = "Gilbert", Callback = function() TeleportToNPC("Gilbert") end})
 TPTab:Button({Title = "George (GEAR)", Callback = function() TeleportToNPC("George") end})
 
--- PERF TAB
 local PerfTab = Window:Tab({Title = "Perf", Icon = "solar:ram-bold"})
 PerfTab:Toggle({Title = "Perf Mode", Callback = function(v) CFG.PerfMode = v; ApplyPerfMode(v) end})
 PerfTab:Button({Title = "FPS Boost", Callback = function() ApplyPerfMode(true) end})
 PerfTab:Button({Title = "Restore Quality", Callback = function() ApplyPerfMode(false) end})
-PerfTab:Button({Title = "Debug Remotes", Callback = DebugRemotes})
 
 ------------------------------------------------------------------------
--- MAIN AUTO LOOP
+-- MAIN LOOP
 ------------------------------------------------------------------------
-WindUI:Notify({Title = "GAG2", Content = "Grow a Garden 2 loaded!", Duration = 3})
+WindUI:Notify({Title = "GAG2", Content = "Loaded!", Duration = 3})
 
 task.spawn(function()
 	while CFG.Running do
@@ -872,7 +875,6 @@ task.spawn(function()
 			end
 			if CFG.AutoSteal then DoSteal(false) end
 		end
-		-- Movement hacks
 		if CFG.SpeedHack then
 			pcall(function()
 				local c = P.Character
@@ -888,11 +890,9 @@ task.spawn(function()
 		if CFG.Noclip then
 			pcall(function()
 				local c = P.Character
-				if c then
-					for _, part in pairs(c:GetDescendants()) do
-						if part:IsA("BasePart") then part.CanCollide = false end
-					end
-				end
+				if c then for _, part in pairs(c:GetDescendants()) do
+					if part:IsA("BasePart") then part.CanCollide = false end
+				end end
 			end)
 		end
 		if CFG.PlantESP or CFG.StealESP or CFG.ValueESP then doESP() end
@@ -900,7 +900,6 @@ task.spawn(function()
 	end
 end)
 
--- Auto-reapply on respawn
 P.CharacterAdded:Connect(function(char)
 	task.wait(0.3)
 	if CFG.SpeedHack then
@@ -909,4 +908,4 @@ P.CharacterAdded:Connect(function(char)
 	end
 end)
 
-print("[GAG2] Module loaded on " .. P.Name)
+print("[GAG2] Loaded on " .. P.Name)
