@@ -69,7 +69,7 @@ local HubsTab = Window:Tab({
 	Icon = "solar:folder-with-files-bold",
 })
 
-local cacheBuster = "?t=" .. tick()
+local cacheBuster = "?v=" .. math.random(1, 999999)
 
 local success, scriptsList = pcall(function()
 	return loadstring(game:HttpGet(REPO_URL .. "/loadstrings.lua" .. cacheBuster))()
