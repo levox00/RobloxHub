@@ -114,6 +114,109 @@ UIS.JumpRequest:Connect(function()
 	end
 end)
 
+local flyEnabled = false
+local flySpeed = 50
+local flyBV, flyBG
+
+UtilsTab:Slider({
+	Title = "Fly Speed",
+	Step = 1,
+	Value = {
+		Min = 10,
+		Max = 300,
+		Default = 50,
+	},
+	Callback = function(value)
+		flySpeed = value
+	end,
+})
+
+UtilsTab:Toggle({
+	Title = "Fly",
+	Desc = "Press E to fly, Q to go down",
+	Callback = function(state)
+		flyEnabled = state
+		local ok, char = pcall(function()
+			return game.Players.LocalPlayer.Character
+		end)
+		if not ok or not char then return end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
+
+		if state then
+			flyBV = Instance.new("BodyVelocity")
+			flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+			flyBV.Velocity = Vector3.zero
+			flyBV.Parent = hrp
+
+			flyBG = Instance.new("BodyGyro")
+			flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+			flyBG.P = 9e4
+			flyBG.Parent = hrp
+		else
+			if flyBV then flyBV:Destroy() flyBV = nil end
+			if flyBG then flyBG:Destroy() flyBG = nil end
+		end
+	end,
+})
+
+UIS.InputBegan:Connect(function(input, gpe)
+	if gpe or not flyEnabled then return end
+	if input.KeyCode == Enum.KeyCode.E then
+		local ok, char = pcall(function()
+			return game.Players.LocalPlayer.Character
+		end)
+		if ok and char then
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
+		end
+	end
+end)
+
+task.spawn(function()
+	while task.wait() do
+		if flyEnabled then
+			local ok, char = pcall(function()
+				return game.Players.LocalPlayer.Character
+			end)
+			if ok and char then
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				local cam = workspace.CurrentCamera
+				if hrp and cam and flyBV and flyBG then
+					local camCF = cam.CFrame
+					local direction = Vector3.zero
+
+					if UIS:IsKeyDown(Enum.KeyCode.W) then
+						direction = direction + camCF.LookVector
+					end
+					if UIS:IsKeyDown(Enum.KeyCode.S) then
+						direction = direction - camCF.LookVector
+					end
+					if UIS:IsKeyDown(Enum.KeyCode.A) then
+						direction = direction - camCF.RightVector
+					end
+					if UIS:IsKeyDown(Enum.KeyCode.D) then
+						direction = direction + camCF.RightVector
+					end
+					if UIS:IsKeyDown(Enum.KeyCode.Space) then
+						direction = direction + Vector3.new(0, 1, 0)
+					end
+					if UIS:IsKeyDown(Enum.KeyCode.Q) then
+						direction = direction - Vector3.new(0, 1, 0)
+					end
+
+					if direction.Magnitude > 0 then
+						direction = direction.Unit
+					end
+
+					flyBV.Velocity = direction * flySpeed
+					flyBG.CFrame = camCF
+				end
+			end
+		end
+	end
+end)
+
 task.spawn(function()
 	while task.wait(0.1) do
 		local ok, char = pcall(function()
