@@ -61,43 +61,51 @@ pcall(function()
 	Window:DisableTopbarButtons({ "Minimize" })
 end)
 
-local MainTab = Window:Tab({
-	Title = "Main",
-	Icon = "home",
+local UtilsTab = Window:Tab({
+	Title = "Utils",
+	Icon = "solar:settings-bold",
 })
 
-MainTab:Button({
-	Title = "Start Loading",
-	Desc = "Click to run the loading screen",
-	Color = Color3.fromHex("#60a5fa"),
-	Callback = function()
-		local Loading = Window:Loading({
-			Title = "Loading...",
-			Desc = "Please wait while the script loads",
-			Duration = 3,
-		})
+local wsEnabled = false
+local wsSpeed = 16
 
-		task.wait(3)
-
-		WindUI:Notify({
-			Title = "Done!",
-			Content = "Loading complete!",
-			Duration = 3,
-		})
+UtilsTab:Slider({
+	Title = "WalkSpeed",
+	Step = 1,
+	Value = {
+		Min = 16,
+		Max = 500,
+		Default = 16,
+	},
+	Callback = function(value)
+		wsSpeed = value
 	end,
 })
 
-MainTab:Button({
-	Title = "Notify Test",
-	Desc = "Sends a notification",
-	Callback = function()
-		WindUI:Notify({
-			Title = "Hello",
-			Content = "This is a test notification!",
-			Duration = 3,
-		})
+UtilsTab:Toggle({
+	Title = "Enable WalkSpeed",
+	Callback = function(state)
+		wsEnabled = state
 	end,
 })
+
+task.spawn(function()
+	while task.wait(0.1) do
+		local ok, char = pcall(function()
+			return game.Players.LocalPlayer.Character
+		end)
+		if ok and char then
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				if wsEnabled then
+					humanoid.WalkSpeed = wsSpeed
+				else
+					humanoid.WalkSpeed = 16
+				end
+			end
+		end
+	end
+end)
 
 local HubsTab = Window:Tab({
 	Title = "Hubs",
