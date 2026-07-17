@@ -1,0 +1,1773 @@
+--[[
+	PussyHub — Grow a Garden 2 Module
+	Based on analysis from XenoNow.lua v15.0 + game scans
+
+	FIXES over the old Miku Nega Hub:
+	1. findSellNPC() — hard-skips George even through NPCS.Model wrapper
+	2. findDialogGui() — now matches "Message" ScreenGui (the actual NPC dialog)
+	3. Sell now uses the real NPC dialog buttons instead of failing silently
+	4. getFruitCount() no longer spam-scans every second on the auto loop
+	5. Clean up thread lifecycle on close
+]]
+
+print("[GAG2] Loading PussyHub module...")
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UIS = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local WS = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
+local RS = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
+local RunService = game:GetService("RunService")
+
+local P = Players.LocalPlayer
+if not P then P = Players.PlayerAdded:Wait() end
+local PG = P:WaitForChild("PlayerGui")
+local SG = Instance.new("ScreenGui")
+SG.Name = "PussyHub_GAG2"
+SG.ResetOnSpawn = false
+SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+SG.Parent = PG
+
+local addLog, notify
+
+------------------------------------------------------------------------
+-- CONFIG
+------------------------------------------------------------------------
+local CFG = {
+	AutoHarvest = true, AutoSell = false, AutoCollect = true,
+	AutoSteal = false, SpeedHack = false, JumpHack = false, Noclip = false,
+	AutoSellWhenFull = true, SpoofMode = true, SellTeleport = true,
+	WalkSpeed = 80, JumpPower = 120,
+	PlantESP = false, StealESP = false, ValueESP = false, PerfMode = false,
+	Running = true, CurrentAction = "IDLE",
+	HarvestCount = 0, StealCount = 0, SellCount = 0, ValueCollected = 0,
+	HarvestDelay = 0.05, FullInventoryThreshold = 10,
+	MY_USER_ID = tostring(P.UserId),
+	_collectCooldown = {}, _harvestCooldown = {},
+	FruitValues = {
+		Blueberry = 10, Strawberry = 15, Raspberry = 20, Tomato = 25,
+		Corn = 30, Pumpkin = 40, Melon = 50, Watermelon = 60,
+		Grape = 35, Apple = 22, Orange = 28, Lemon = 32,
+		Cherry = 45, Peach = 38, Pear = 42, Banana = 55,
+		Kiwi = 48, Mango = 65, Pineapple = 80,
+		Sunflower = 12, Acorn = 8, Beanstalk = 70, Cactus = 35,
+		Coconut = 45,
+		["Poison Apple"] = 20, ["Venus Fly Trap"] = 55,
+		["Thorn Rose"] = 60, Pomegranate = 40, Lotus = 50,
+		["Poison Ivy"] = 25, ["Ghost Pepper"] = 90, Romanesco = 30,
+		["Baby Cactus"] = 18, ["Glow Mushroom"] = 75, ["Horned Melon"] = 85,
+		Pinetree = 15, ["Moon Bloom"] = 95, ["Dragon Fruit"] = 100,
+		["Dragon's Breath"] = 95, ["Green Bean"] = 22, ["Venom Spitter"] = 65,
+		["Briar Rose"] = 70, ["Hypno Bloom"] = 88, ["Fire Fern"] = 92,
+		["Sun Bloom"] = 78, ["Eclipse Bloom"] = 130, ["Star Fruit"] = 150,
+	},
+}
+
+------------------------------------------------------------------------
+-- COLORS (neon dark)
+------------------------------------------------------------------------
+local C = {
+	bg     = Color3.fromRGB(10, 10, 18),
+	bg2    = Color3.fromRGB(14, 14, 26),
+	panel  = Color3.fromRGB(20, 20, 36),
+	panel2 = Color3.fromRGB(26, 26, 46),
+	panel3 = Color3.fromRGB(32, 32, 56),
+	stroke = Color3.fromRGB(52, 52, 88),
+	magenta = Color3.fromRGB(255, 45, 120),
+	cyan   = Color3.fromRGB(0, 229, 255),
+	violet = Color3.fromRGB(150, 90, 255),
+	lime   = Color3.fromRGB(170, 255, 60),
+	amber  = Color3.fromRGB(255, 200, 40),
+	red    = Color3.fromRGB(255, 70, 85),
+	text   = Color3.fromRGB(245, 245, 255),
+	textDim = Color3.fromRGB(150, 150, 190),
+}
+
+------------------------------------------------------------------------
+-- HELPERS
+------------------------------------------------------------------------
+local function tw(obj, t, p, s, d)
+	s = s or Enum.EasingStyle.Quint; d = d or Enum.EasingDirection.Out
+	pcall(function() TweenService:Create(obj, TweenInfo.new(t, s, d), p):Play() end)
+end
+
+local function corner(r)
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, r); return c
+end
+
+local function stroke(col, th, tr)
+	local s = Instance.new("UIStroke"); s.Color = col; s.Thickness = th or 1
+	s.Transparency = tr or 0; s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border; return s
+end
+
+local function grad(c1, c2, rot)
+	local g = Instance.new("UIGradient"); g.Color = ColorSequence.new(c1, c2)
+	g.Rotation = rot or 90; return g
+end
+
+local function ripple(p, x, y, c)
+	task.spawn(function()
+		local r = Instance.new("Frame")
+		r.Size = UDim2.new(0, 0, 0, 0); r.Position = UDim2.new(0, x, 0, y)
+		r.AnchorPoint = Vector2.new(0.5, 0.5)
+		r.BackgroundColor3 = c or C.cyan; r.BackgroundTransparency = 0.55
+		r.BorderSizePixel = 0; r.ZIndex = p.ZIndex + 5; r.Parent = p
+		corner(999).Parent = r
+		tw(r, 0.5, {Size = UDim2.new(0, 200, 0, 200), BackgroundTransparency = 1}, Enum.EasingStyle.Quint)
+		Debris:AddItem(r, 0.55)
+	end)
+end
+
+local function checkCooldown(tbl, key, cd)
+	local now = tick()
+	if now - (tbl[key] or 0) >= cd then tbl[key] = now; return true end
+	return false
+end
+
+------------------------------------------------------------------------
+-- FRUIT / INVENTORY HELPERS
+------------------------------------------------------------------------
+local function isUtilityTool(tool)
+	local n = tool.Name:lower()
+	if n:find("shovel") or n:find("build") or n:find("giftholder") or n:find("mail")
+		or n:find("gift") or n:find("water") or n:find("can") or n:find("trowel")
+		or n:find("rake") or n:find("spray") or n:find("wrench") or n:find("hammer")
+		or n:find("lantern") or n:find("teleport") or n:find("megaphone")
+		or n:find("boombox") or n:find("crowbar") or n:find("hose")
+		or n:find("staff") or n:find("carpet") or n:find("magnet")
+		or n:find("grappling") or n:find("spring") or n:find("freeze") then
+		return true
+	end
+	local hf = tool:GetAttribute("HarvestedFruit")
+	local fn = tool:GetAttribute("Fruit") or tool:GetAttribute("FruitName")
+	if hf == true or (type(fn) == "string" and fn ~= "") then return false end
+	return true
+end
+
+local function getToolFruitValue(tool)
+	if not tool or not tool:IsA("Tool") then return 0, "", 1 end
+	local fname = tool:GetAttribute("Fruit") or tool:GetAttribute("FruitName") or ""
+	local weight = tool:GetAttribute("Weight")
+	if type(weight) ~= "number" then
+		local w = tool.Name:match("%[(%d+%.?%d*)%s*k?g%]")
+		weight = tonumber(w) or 1
+	end
+	local clean = fname
+	if clean == "" then
+		clean = tool.Name:gsub("%[.-%]", ""):gsub("%s+$", ""):gsub("^%s+", "")
+	end
+	local base = CFG.FruitValues[clean] or 0
+	local value = base * weight
+	if tool.Name:find("%[Gold%]") then value = value * 1.3 end
+	return math.floor(value), (fname ~= "" and fname or clean), weight
+end
+
+local function getFruitCount()
+	local count = 0
+	local function scan(container)
+		if not container then return end
+		for _, v in pairs(container:GetChildren()) do
+			if v:IsA("Tool") and not isUtilityTool(v) then count = count + 1 end
+		end
+	end
+	scan(P:FindFirstChild("Backpack"))
+	scan(P.Character)
+	return count
+end
+
+local function getInventoryWithValues()
+	local items = {}
+	local function scan(cont, label)
+		if not cont then return end
+		for _, v in pairs(cont:GetChildren()) do
+			if v:IsA("Tool") and not isUtilityTool(v) then
+				local val, fruitName, weight = getToolFruitValue(v)
+				table.insert(items, {name = v.Name, value = val, inst = v, fruitName = fruitName, weight = weight, source = label})
+			end
+		end
+	end
+	scan(P:FindFirstChild("Backpack"), "Backpack")
+	scan(P.Character, "Character")
+	table.sort(items, function(a, b) return a.value > b.value end)
+	return items
+end
+
+local function valueToColor(val)
+	if val >= 100 then return C.violet end
+	if val >= 60  then return C.magenta end
+	if val >= 30  then return C.amber end
+	return C.cyan
+end
+
+------------------------------------------------------------------------
+-- PROMPT / BUTTON FIRING
+------------------------------------------------------------------------
+local function firePrompt(prompt)
+	if not prompt then return end
+	if prompt:IsA("ProximityPrompt") then
+		pcall(function() fireproximityprompt(prompt) end)
+		pcall(function()
+			prompt:InputHoldBegin()
+			task.wait(math.max(0.05, prompt.HoldDuration or 0.05))
+			prompt:InputHoldEnd()
+		end)
+	elseif prompt:IsA("ClickDetector") then
+		pcall(function() fireclickdetector(prompt) end)
+	end
+end
+
+local function spoofCFire(part, prompt)
+	pcall(function()
+		if CFG.SpoofMode then
+			firePrompt(prompt)
+		else
+			local char = P.Character
+			if char and char:FindFirstChild("HumanoidRootPart") and part then
+				local hrp = char.HumanoidRootPart
+				local orig = hrp.CFrame
+				hrp.CFrame = part.CFrame + Vector3.new(0, 0.5, 0)
+				task.wait(0.05)
+				firePrompt(prompt)
+				hrp.CFrame = orig
+			end
+		end
+	end)
+end
+
+local function clickGuiButton(btn, why)
+	if not btn then return false end
+	if type(firesignal) == "function" then
+		pcall(function() firesignal(btn.MouseButton1Click) end)
+		pcall(function() firesignal(btn.Activated) end)
+	end
+	if type(getconnections) == "function" then
+		pcall(function()
+			for _, c in ipairs(getconnections(btn.MouseButton1Click)) do pcall(function() c:Fire() end) end
+		end)
+	end
+	pcall(function() btn.MouseButton1Click:Fire() end)
+	pcall(function() btn.Activated:Fire() end)
+	pcall(function()
+		local vim = game:GetService("VirtualInputManager")
+		local inset = GuiService:GetGuiInset()
+		local pos, size = btn.AbsolutePosition, btn.AbsoluteSize
+		local x = pos.X + size.X / 2
+		local y = pos.Y + size.Y / 2 + inset.Y
+		vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		task.wait(0.05)
+		vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end)
+	return true
+end
+
+------------------------------------------------------------------------
+-- GARDEN / PLOT OWNERSHIP
+-- (Scan v2 confirmed: plants named {UserId}_{uuid}, CustomiseTheme enabled = yours)
+------------------------------------------------------------------------
+local function isMyPlot(plot)
+	for _, a in ipairs({"Owner", "UserId", "OwnerId", "OwnerUserId", "PlayerId"}) do
+		local v = plot:GetAttribute(a)
+		if tonumber(v) and tonumber(v) == P.UserId then return true end
+		if type(v) == "string" and v == P.Name then return true end
+	end
+	local plants = plot:FindFirstChild("Plants")
+	if plants then
+		for _, pl in pairs(plants:GetChildren()) do
+			if tonumber(pl:GetAttribute("UserId")) == P.UserId then return true end
+			if pl.Name:match("^(%d+)_") == CFG.MY_USER_ID then return true end
+		end
+	end
+	-- Customise prompt enabled = your garden
+	local signs = plot:FindFirstChild("Signs")
+	if signs then
+		local cp = signs:FindFirstChild("Garden")
+		if cp then
+			local cp2 = cp:FindFirstChild("CorePart")
+			if cp2 then
+				for _, d in pairs(cp2:GetDescendants()) do
+					if d:IsA("ProximityPrompt") and d.Enabled and d.Name == "CustomiseTheme" then
+						return true
+					end
+				end
+			end
+		end
+	end
+	return false
+end
+
+local function getMyGarden()
+	local gardens = WS:FindFirstChild("Gardens")
+	if not gardens then return nil end
+	for _, plot in pairs(gardens:GetChildren()) do
+		if plot:IsA("Model") and isMyPlot(plot) then return plot end
+	end
+	return nil
+end
+
+------------------------------------------------------------------------
+-- HARVEST
+------------------------------------------------------------------------
+local function isHarvestPrompt(d)
+	if not d:IsA("ProximityPrompt") or not d.Enabled then return false end
+	local at = (d.ActionText or ""):lower()
+	return d.Name == "HarvestPrompt" or at == "collect" or at == "harvest"
+end
+
+local function getMyHarvestTargets()
+	local plot = getMyGarden()
+	if not plot then return {} end
+	local plants = plot:FindFirstChild("Plants")
+	if not plants then return {} end
+	local targets, seen = {}, {}
+	for _, plant in pairs(plants:GetChildren()) do
+		local seedName = plant:GetAttribute("SeedName") or "?"
+		local sm = 1
+		local fruits = plant:FindFirstChild("Fruits")
+		if fruits then
+			local fr = fruits:GetChildren()[1]
+			if fr then sm = tonumber(fr:GetAttribute("SizeMulti")) or 1 end
+		end
+		local ev = math.floor((CFG.FruitValues[seedName] or 10) * sm)
+		for _, d in pairs(plant:GetDescendants()) do
+			if isHarvestPrompt(d) then
+				local part = d.Parent
+				if part and part:IsA("BasePart") and not seen[d] then
+					seen[d] = true
+					table.insert(targets, {part = part, prompt = d, key = d:GetFullName(), value = ev, seed = seedName})
+				end
+			end
+		end
+	end
+	table.sort(targets, function(a, b) return a.value > b.value end)
+	return targets
+end
+
+local function DoHarvest(quiet)
+	local ok, err = pcall(function()
+		local targets = getMyHarvestTargets()
+		if #targets == 0 then
+			if not quiet and addLog then addLog("No harvestable fruits", C.amber) end
+			return
+		end
+		if addLog then addLog("Harvesting " .. #targets .. " fruits (value order)", C.cyan) end
+		local h = 0
+		for _, t in ipairs(targets) do
+			if checkCooldown(CFG._harvestCooldown, t.key, 0.4) then
+				spoofCFire(t.part, t.prompt)
+				h = h + 1
+				CFG.HarvestCount = CFG.HarvestCount + 1
+			end
+			task.wait(CFG.HarvestDelay)
+		end
+		if h > 0 then
+			if addLog then addLog("Harvested " .. h .. "!", C.lime) end
+			if notify then notify("Harvest", h .. " fruits collected", C.lime) end
+		end
+	end)
+	if not ok and addLog then addLog("Harvest error: " .. tostring(err), C.red) end
+end
+
+------------------------------------------------------------------------
+-- SELL (FIXED: NPC selection, dialog detection, button clicking)
+------------------------------------------------------------------------
+-- Scan v2 confirmation:
+--   NPCS.Steven (direct), NPCS.Gilbert (direct), NPCS.Charlotte (direct),
+--   NPCS.Sam (direct), NPCS.Model.George (wrapped in NPCS.Model subfolder)
+--   Dialog ScreenGui is "Message" (NOT named "dialog" or "npc")
+local SELL_NPC_ORDER = {"Steven", "Sam", "Charlotte", "Gilbert"} -- George hard-excluded
+
+local function findSellNPC()
+	local npcs = WS:FindFirstChild("NPCS")
+	if not npcs then return nil, nil, nil end
+	local candidates = {}
+
+	local function consider(npcModel, npcLabel)
+		if not npcModel then return end
+		-- FIX: hard-skip George even when nested in NPCS.Model subfolder
+		local labelLower = npcLabel:lower()
+		if labelLower:find("george") then return end
+		-- Also scan the npcModel's HUMAN name attribute if it has one
+		local humanName = (npcModel:FindFirstChild("Humanoid") and npcModel.Humanoid:FindFirstChild("HumanoidDescription"))
+		if humanName then
+			local descName = humanName.Parent.Parent.Name:lower()
+			if descName:find("george") then return end
+		end
+
+		for _, d in pairs(npcModel:GetDescendants()) do
+			if d:IsA("ProximityPrompt") then
+				local at = (d.ActionText or ""):lower()
+				local nm = d.Name:lower()
+				if not (nm:find("exit") or at:find("exit")) and (at == "talk" or at:find("sell")) then
+					local parent = d.Parent
+					if parent and parent:IsA("BasePart") then
+						local score = 10
+						if at:find("sell") then score = score + 200 end
+						if at == "talk" then score = score + 50 end
+						for i, pref in ipairs(SELL_NPC_ORDER) do
+							if labelLower:find(pref:lower()) then score = score + (120 - i * 10) end
+						end
+						table.insert(candidates, {part = parent, prompt = d, name = npcLabel, score = score})
+					end
+				end
+			end
+		end
+	end
+
+	-- Prefer named NPCs first (direct children of NPCS)
+	for _, name in ipairs(SELL_NPC_ORDER) do
+		consider(npcs:FindFirstChild(name), name)
+	end
+	-- Then scan everything else (but skip Model wrapper which contains George)
+	for _, npc in pairs(npcs:GetChildren()) do
+		if not npc.Name:lower():find("model") then -- skip Model wrapper
+			consider(npc, npc.Name)
+		end
+	end
+
+	if #candidates == 0 then return nil, nil, nil end
+	table.sort(candidates, function(a, b) return a.score > b.score end)
+	local best = candidates[1]
+	return best.part, best.prompt, best.name
+end
+
+-- FIX: The NPC dialog ScreenGui is named "Message" (confirmed by both logs and scan)
+local function findDialogGui()
+	local m = PG:FindFirstChild("Message")
+	if m and m:IsA("ScreenGui") and m.Enabled then return m end
+	-- Fallback: any ScreenGui whose name contains "dialog" or "npc"
+	for _, gui in pairs(PG:GetChildren()) do
+		if gui:IsA("ScreenGui") and gui.Enabled then
+			local gn = gui.Name:lower()
+			if gn:find("dialog") or (gn:find("npc") and not gn:find("pussyhub") and not gn:find("miku")) then
+				return gui
+			end
+		end
+	end
+	return nil
+end
+
+local function clickSellAllButton()
+	local dlg = findDialogGui()
+	if not dlg then
+		if addLog then addLog("No dialog GUI open (Message not found)", C.amber) end
+		return false
+	end
+	if addLog then addLog("Dialog found: " .. dlg:GetFullName(), C.cyan) end
+	local options = {}
+	for _, d in pairs(dlg:GetDescendants()) do
+		if (d:IsA("TextButton") or d:IsA("ImageButton")) and d.Visible ~= false then
+			local tx = ""
+			pcall(function() tx = d.Text or "" end)
+			local ln = (tx .. " " .. d.Name):lower()
+			local bad = ln:find("exit") or ln:find("close") or ln:find("cancel")
+				or ln:find("nevermind") or ln:find("buy") or ln:find("gift")
+				or ln:find("friend") or ln:find("decline")
+			if not bad then
+				local sellHit = 0
+				for _, pat in ipairs({"sell all", "sellall", "sell inventory", "sell crops",
+				                      "sell fruit", "sell items", "sell everything", "sell"}) do
+					if ln:find(pat) then sellHit = 100 break end
+				end
+				local lo = 999
+				pcall(function() lo = d.LayoutOrder end)
+				table.insert(options, {btn = d, sell = sellHit, lo = lo, tx = tx})
+			end
+		end
+	end
+	if #options == 0 then
+		if addLog then addLog("Dialog has no clickable options", C.red) end
+		return false
+	end
+	table.sort(options, function(a, b)
+		if a.sell ~= b.sell then return a.sell > b.sell end
+		return a.lo < b.lo
+	end)
+	if addLog then addLog("Clicking '" .. options[1].tx .. "' sell=" .. options[1].sell, C.lime) end
+	return clickGuiButton(options[1].btn, "dialog-sell-option")
+end
+
+local function pressTeleportSellButton()
+	local tb = PG:FindFirstChild("TeleportButtons")
+	if not tb then return false end
+	for _, d in pairs(tb:GetDescendants()) do
+		if (d:IsA("TextButton") or d:IsA("ImageButton")) and d.Name:lower():find("sell") then
+			clickGuiButton(d, "TeleportButtons.SellButton")
+			return true
+		end
+	end
+	return false
+end
+
+local function DoSell()
+	local ok, err = pcall(function()
+		local items = getInventoryWithValues()
+		local fc = getFruitCount()
+		if #items == 0 and fc == 0 then
+			if addLog then addLog("Nothing to sell", C.amber) end
+			return
+		end
+		local totalVal = 0
+		for _, it in ipairs(items) do totalVal = totalVal + it.value end
+		if addLog then addLog("Selling ~" .. math.max(#items, fc) .. " fruits (~" .. totalVal .. "c)...", C.amber) end
+
+		local char = P.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then
+			if addLog then addLog("No character/HRP!", C.red) end
+			return
+		end
+		local hrp = char.HumanoidRootPart
+		local origCFrame = hrp.CFrame
+
+		-- Step 0: Teleport to sell area
+		if CFG.SellTeleport then
+			pressTeleportSellButton()
+			task.wait(1.0)
+		end
+
+		-- Step 1: Talk to best sell NPC (NEVER George, FIXED)
+		local nhrp, prompt, npcName = findSellNPC()
+		if nhrp and prompt then
+			if addLog then addLog("Talk NPC: " .. npcName, C.cyan) end
+			if CFG.SellTeleport then
+				pcall(function() hrp.CFrame = nhrp.CFrame * CFrame.new(0, 0, 3) end)
+				task.wait(0.4)
+			end
+			firePrompt(prompt)
+			task.wait(0.25)
+			firePrompt(prompt)
+		else
+			if addLog then addLog("No sell NPC found", C.red) end
+		end
+
+		-- Step 2: Wait for dialog GUI, click sell button, chain confirms
+		local clicked = false
+		for attempt = 1, 10 do
+			task.wait(0.45)
+			-- Check if GearShop opened (wrong NPC)
+			local gear = PG:FindFirstChild("GearShop")
+			if gear and gear.Enabled then
+				if addLog then addLog("GearShop opened — closing", C.amber) end
+				for _, d in pairs(gear:GetDescendants()) do
+					if d:IsA("TextButton") and d.Name:lower():find("exit") then
+						clickGuiButton(d, "close-GearShop"); break
+					end
+				end
+				break
+			end
+			if findDialogGui() then
+				clicked = clickSellAllButton()
+				if clicked then
+					for chain = 1, 3 do
+						task.wait(0.5)
+						if findDialogGui() then clickSellAllButton() else break end
+					end
+					break
+				end
+			end
+		end
+
+		task.wait(0.8)
+		local fcMid = getFruitCount()
+
+		-- Step 3: Still full → try other NPCs once each
+		if fcMid >= fc then
+			local npcs = WS:FindFirstChild("NPCS")
+			if npcs then
+				for _, name in ipairs(SELL_NPC_ORDER) do
+					if getFruitCount() < fc then break end
+					local node = npcs:FindFirstChild(name)
+					if node then
+						local pr, part
+						for _, d in pairs(node:GetDescendants()) do
+							if d:IsA("ProximityPrompt") and (d.ActionText or ""):lower() == "talk"
+								and not d.Name:lower():find("exit") then
+								pr, part = d, d.Parent; break
+							end
+						end
+						if pr and part and part:IsA("BasePart") then
+							if CFG.SellTeleport then
+								pcall(function() hrp.CFrame = part.CFrame * CFrame.new(0, 0, 2.5) end)
+								task.wait(0.35)
+							end
+							firePrompt(pr)
+							task.wait(0.8)
+							clickSellAllButton()
+							task.wait(0.7)
+						end
+					end
+				end
+			end
+		end
+
+		if CFG.SellTeleport then pcall(function() hrp.CFrame = origCFrame end) end
+		task.wait(0.2)
+
+		local fcAfter = getFruitCount()
+		if fcAfter < fc then
+			CFG.SellCount = CFG.SellCount + (fc - fcAfter)
+			CFG.ValueCollected = CFG.ValueCollected + totalVal
+			if addLog then addLog("SOLD! " .. fc .. " -> " .. fcAfter, C.lime) end
+			if notify then notify("Sold", (fc - fcAfter) .. " fruits (~" .. totalVal .. "c)", C.lime) end
+		else
+			if addLog then addLog("Sell failed — dialog didn't sell", C.red) end
+		end
+	end)
+	if not ok and addLog then addLog("Sell error: " .. tostring(err), C.red) end
+end
+
+------------------------------------------------------------------------
+-- COLLECT (sheckles / drops)
+------------------------------------------------------------------------
+local COLLECT_NAMES = {"sheckle", "coin", "orb", "pickup", "drop", "collect"}
+local function doCollect()
+	pcall(function()
+		local char = P.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+		local hrp = char.HumanoidRootPart
+		local collected, perPass = 0, 0
+		for _, v in pairs(WS:GetDescendants()) do
+			if perPass >= 40 then break end
+			if v:IsA("BasePart") then
+				local n = v.Name:lower()
+				local match = false
+				for _, kw in ipairs(COLLECT_NAMES) do
+					if n:find(kw) then match = true break end
+				end
+				if match then
+					local dist = (hrp.Position - v.Position).Magnitude
+					if dist <= 250 then
+						local key = v:GetFullName()
+						if checkCooldown(CFG._collectCooldown, key, 0.6) then
+							local fired = false
+							for _, d in pairs(v:GetDescendants()) do
+								if d:IsA("ProximityPrompt") and d.Enabled then
+									firePrompt(d); fired = true; break
+								end
+							end
+							if v:IsA("ProximityPrompt") and v.Enabled then firePrompt(v); fired = true end
+							if not fired then
+								pcall(function() v.CFrame = hrp.CFrame end)
+							end
+							collected = collected + 1
+							perPass = perPass + 1
+						end
+					end
+				end
+			elseif v:IsA("Model") then
+				local n = v.Name:lower()
+				for _, kw in ipairs(COLLECT_NAMES) do
+					if n:find(kw) then
+						local part = v:FindFirstChildWhichIsA("BasePart")
+						if part and (hrp.Position - part.Position).Magnitude <= 250 then
+							local key = v:GetFullName()
+							if checkCooldown(CFG._collectCooldown, key, 0.6) then
+								for _, d in pairs(v:GetDescendants()) do
+									if d:IsA("ProximityPrompt") and d.Enabled then
+										firePrompt(d); collected = collected + 1; perPass = perPass + 1; break
+									end
+								end
+							end
+						end
+						break
+					end
+				end
+			end
+		end
+		if collected > 0 and addLog then addLog("Collected " .. collected .. " drops", C.cyan) end
+	end)
+end
+
+------------------------------------------------------------------------
+-- SCAN / STEAL
+------------------------------------------------------------------------
+local function ScanGarden()
+	pcall(function()
+		local plot = getMyGarden()
+		if not plot then if addLog then addLog("No garden found!", C.red) end return end
+		local plants = plot:FindFirstChild("Plants")
+		if plants then
+			local count = #plants:GetChildren()
+			local harvestable = 0
+			for _, pl in pairs(plants:GetChildren()) do
+				for _, d in pairs(pl:GetDescendants()) do
+					if isHarvestPrompt(d) then harvestable = harvestable + 1 break end
+				end
+			end
+			if addLog then
+				addLog("Garden: " .. plot.Name .. " | Plants: " .. count .. " | Harvestable: " .. harvestable, C.cyan)
+			end
+			if notify then notify("Garden Scan", count .. " plants, " .. harvestable .. " ready", C.cyan) end
+		end
+	end)
+end
+
+local function getStealTargets()
+	local gardens = WS:FindFirstChild("Gardens")
+	if not gardens then return {} end
+	local targets = {}
+	for _, plot in pairs(gardens:GetChildren()) do
+		if plot:IsA("Model") and not isMyPlot(plot) then
+			local plants = plot:FindFirstChild("Plants")
+			if plants then
+				for _, pl in pairs(plants:GetChildren()) do
+					for _, d in pairs(pl:GetDescendants()) do
+						if d:IsA("ProximityPrompt") and d.Enabled
+							and (d.ActionText or ""):lower() == "steal" then
+							local part = d.Parent
+							if part and part:IsA("BasePart") then
+								table.insert(targets, {part = part, prompt = d, key = pl.Name .. d:GetFullName()})
+							end
+							break
+						end
+					end
+				end
+			end
+		end
+	end
+	return targets
+end
+
+local function FindStealable()
+	pcall(function()
+		local targets = getStealTargets()
+		if addLog then addLog("Stealable fruits: " .. #targets, C.magenta) end
+		if notify then notify("Steal Scan", #targets .. " targets found", C.magenta) end
+	end)
+end
+
+local function DoSteal(forceNight)
+	pcall(function()
+		local ct = Lighting.ClockTime
+		if not forceNight and not (ct < 6 or ct > 18) then
+			if addLog then addLog("Not night (" .. math.floor(ct) .. ":00)", C.amber) end
+			return
+		end
+		local targets = getStealTargets()
+		if #targets == 0 then
+			if addLog then addLog("No stealable fruits", C.amber) end
+			return
+		end
+		if addLog then addLog("Stealing " .. #targets .. "...", C.magenta) end
+		local stolen = 0
+		for _, t in ipairs(targets) do
+			if checkCooldown(CFG._harvestCooldown, t.key, 0.4) then
+				spoofCFire(t.part, t.prompt)
+				stolen = stolen + 1
+				CFG.StealCount = CFG.StealCount + 1
+			end
+			task.wait(CFG.HarvestDelay)
+		end
+		if addLog then addLog("Stole " .. stolen .. "!", C.magenta) end
+		if notify and stolen > 0 then notify("Steal", stolen .. " fruits stolen", C.magenta) end
+	end)
+end
+
+------------------------------------------------------------------------
+-- TELEPORTS
+------------------------------------------------------------------------
+local function TeleportToMyGarden()
+	pcall(function()
+		local plot = getMyGarden()
+		if not plot then if addLog then addLog("No garden found!", C.red) end return end
+		local char = P.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+		local ref = plot:FindFirstChildWhichIsA("BasePart")
+		if ref then
+			char.HumanoidRootPart.CFrame = ref.CFrame + Vector3.new(0, 5, 0)
+			if addLog then addLog("TP -> " .. plot.Name, C.cyan) end
+		end
+	end)
+end
+
+local function TeleportToNPC(name)
+	pcall(function()
+		local npcs = WS:FindFirstChild("NPCS")
+		if not npcs then if addLog then addLog("NPCS folder not found", C.red) end return end
+		local npc = npcs:FindFirstChild(name)
+		if not npc then
+			-- Check inside Model wrapper (George etc)
+			local m = npcs:FindFirstChild("Model")
+			if m then npc = m:FindFirstChild(name) end
+		end
+		if not npc then
+			if addLog then addLog("NPC " .. name .. " not found", C.red) end return
+		end
+		local char = P.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+		local nhrp = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart")
+		if nhrp then
+			char.HumanoidRootPart.CFrame = nhrp.CFrame + Vector3.new(0, 3, 4)
+			if addLog then addLog("TP -> " .. name, C.cyan) end
+		end
+	end)
+end
+
+local function TeleportToSellStand()
+	pcall(function()
+		local char = P.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+		local hrp = char.HumanoidRootPart
+		local map = WS:FindFirstChild("Map")
+		if map then
+			local stands = map:FindFirstChild("Stands")
+			if stands then
+				local sell = stands:FindFirstChild("Sell")
+				if sell then
+					local ref = sell:FindFirstChildWhichIsA("BasePart") or sell.PrimaryPart
+					if ref then
+						hrp.CFrame = ref.CFrame + Vector3.new(0, 3, 3)
+						if addLog then addLog("TP -> Sell Stand", C.cyan) end
+						return
+					end
+				end
+			end
+		end
+		hrp.CFrame = CFrame.new(268.4, 148, -127.5) -- fallback
+		if addLog then addLog("TP -> Sell (fallback)", C.cyan) end
+	end)
+end
+
+------------------------------------------------------------------------
+-- PERFORMANCE / DEBUG
+------------------------------------------------------------------------
+local function ApplyPerfMode(enabled)
+	pcall(function()
+		local Settings
+		pcall(function() Settings = settings() end)
+		if enabled then
+			if Settings then pcall(function() Settings.Rendering.QualityLevel = 1 end) end
+			Lighting.GlobalShadows = false
+			Lighting.FogEnd = 999999
+			Lighting.Brightness = 0
+			for _, v in pairs(Lighting:GetChildren()) do
+				if v:IsA("PostEffect") then v.Enabled = false end
+			end
+			if addLog then addLog("Perf mode ON", C.amber) end
+		else
+			if Settings then pcall(function() Settings.Rendering.QualityLevel = Enum.QualityLevel.Level09 end) end
+			Lighting.GlobalShadows = true
+			Lighting.FogEnd = 100000
+			Lighting.Brightness = 2
+			for _, v in pairs(Lighting:GetChildren()) do
+				if v:IsA("PostEffect") then v.Enabled = true end
+			end
+			if addLog then addLog("Perf mode OFF", C.cyan) end
+		end
+	end)
+end
+
+local function DebugRemotes()
+	pcall(function()
+		if not addLog then return end
+		addLog("=== REMOTE DEBUG (capped at 60) ===", C.cyan)
+		local found = 0
+		local function scan2(v, path, depth)
+			if found >= 60 or depth > 8 then return end
+			for _, c in pairs(v:GetChildren()) do
+				if found >= 60 then return end
+				if c:IsA("RemoteEvent") then
+					found = found + 1
+					addLog("RE: " .. path .. "." .. c.Name, C.textDim)
+				elseif c:IsA("RemoteFunction") then
+					found = found + 1
+					addLog("RF: " .. path .. "." .. c.Name, C.textDim)
+				end
+				scan2(c, path .. "." .. c.Name, depth + 1)
+			end
+		end
+		scan2(RS, "RS", 0)
+		addLog("=== " .. found .. " remotes shown ===", C.cyan)
+	end)
+end
+
+------------------------------------------------------------------------
+-- ESP
+------------------------------------------------------------------------
+local espObjs = {}
+local function clearESP()
+	for _, e in pairs(espObjs) do pcall(function() e:Destroy() end) end
+	espObjs = {}
+end
+
+local function makeESP(part, txt, col, h)
+	if not part or part:FindFirstChild("_PH_ESP") then return end
+	h = h or 16
+	local bg = Instance.new("BillboardGui")
+	bg.Name = "_PH_ESP"
+	bg.Size = UDim2.new(0, 90, 0, h + 4)
+	bg.StudsOffset = Vector3.new(0, 2.5, 0)
+	bg.AlwaysOnTop = true
+	bg.MaxDistance = 500
+	bg.Parent = part
+	local lb = Instance.new("TextLabel")
+	lb.Size = UDim2.new(1, 0, 1, 0)
+	lb.BackgroundColor3 = Color3.fromRGB(8, 8, 14)
+	lb.BackgroundTransparency = 0.25
+	lb.BorderSizePixel = 0
+	lb.Text = txt
+	lb.TextColor3 = col
+	lb.TextScaled = true
+	lb.Font = Enum.Font.GothamBold
+	lb.Parent = bg
+	local lc = Instance.new("UICorner"); lc.CornerRadius = UDim.new(0, 4); lc.Parent = lb
+	local ls = Instance.new("UIStroke"); ls.Color = col; ls.Thickness = 1; ls.Transparency = 0.3; ls.Parent = lb
+	table.insert(espObjs, bg)
+end
+
+local function doESP()
+	if not CFG.PlantESP and not CFG.StealESP and not CFG.ValueESP then
+		if #espObjs > 0 then clearESP() end
+		return
+	end
+	pcall(function()
+		clearESP()
+		local gardens = WS:FindFirstChild("Gardens")
+		if gardens then
+			for _, plot in pairs(gardens:GetChildren()) do
+				if plot:IsA("Model") then
+					local mine = isMyPlot(plot)
+					local plants = plot:FindFirstChild("Plants")
+					if plants then
+						for _, pl in pairs(plants:GetChildren()) do
+							local basePart = pl:FindFirstChild("Base")
+							if not basePart or not basePart:IsA("BasePart") then
+								basePart = pl:FindFirstChildWhichIsA("BasePart")
+							end
+							local seedName = pl:GetAttribute("SeedName") or "?"
+							local ready = pl:GetAttribute("PlantGrowthReady")
+							local age = tonumber(pl:GetAttribute("Age")) or 0
+							local maxAge = tonumber(pl:GetAttribute("MaxAge")) or 0
+							local readyText = (ready == true or (maxAge > 0 and age >= maxAge)) and "READY" or "growing"
+
+							if basePart then
+								if mine and CFG.PlantESP then
+									makeESP(basePart, "HARVEST " .. seedName .. " (" .. readyText .. ")", C.lime, 18)
+								elseif not mine and CFG.StealESP then
+									makeESP(basePart, "STEAL " .. seedName .. " (" .. readyText .. ")", C.magenta, 18)
+								end
+							end
+
+							if CFG.ValueESP then
+								local fruits = pl:FindFirstChild("Fruits")
+								if fruits then
+									for _, fr in pairs(fruits:GetChildren()) do
+										if fr:IsA("Model") then
+											local part = fr:FindFirstChildWhichIsA("BasePart")
+											local fname = fr:GetAttribute("CorePartName") or seedName
+											local fa = tonumber(fr:GetAttribute("Age")) or 0
+											local fm = tonumber(fr:GetAttribute("MaxAge")) or 1
+											local sm = tonumber(fr:GetAttribute("SizeMulti")) or 1
+											local value = math.floor((CFG.FruitValues[fname] or CFG.FruitValues[seedName] or 10) * sm)
+											if part then
+												local ripe = fa >= fm
+												makeESP(part, ripe and (fname .. " " .. value .. "$") or (fname .. " growing"), valueToColor(value), 14)
+											end
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end)
+end
+
+local function isNightTime()
+	return Lighting.ClockTime < 6 or Lighting.ClockTime > 18
+end
+
+------------------------------------------------------------------------
+-- UI: SCREEN GUI + MAIN WINDOW
+------------------------------------------------------------------------
+-- Clean up old instances
+for _, v in pairs(PG:GetChildren()) do
+	if v.Name == "PussyHub_GAG2" then v:Destroy() end
+end
+
+local MF = Instance.new("Frame"); MF.Name = "Main"
+MF.Size = UDim2.new(0, 500, 0, 540)
+MF.Position = UDim2.new(0.5, -250, 0.5, -270)
+MF.BackgroundColor3 = C.bg2
+MF.BorderSizePixel = 0; MF.Active = true; MF.Visible = true
+MF.ClipsDescendants = true; MF.Parent = SG
+corner(14).Parent = MF
+
+local halo = Instance.new("Frame")
+halo.Size = UDim2.new(1, 28, 1, 28); halo.Position = UDim2.new(0, -14, 0, -14)
+halo.BackgroundTransparency = 1; halo.ZIndex = 0; halo.Parent = MF
+local haloStroke = stroke(C.magenta, 10, 0.82); haloStroke.Parent = halo
+grad(C.magenta, C.cyan, 45).Parent = haloStroke
+corner(20).Parent = halo
+
+local MFStroke = stroke(C.violet, 1.5, 0.15); MFStroke.Parent = MF
+grad(C.magenta, C.cyan, 45).Parent = MFStroke
+
+-- Animated border
+task.spawn(function()
+	local seq = {C.magenta, C.cyan, C.violet, C.lime, C.magenta}
+	local i = 1
+	while MF and MF.Parent and CFG.Running do
+		i = i % #seq + 1
+		tw(MFStroke, 1.6, {Color = seq[i]}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+		tw(haloStroke, 1.6, {Color = seq[i]}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+		task.wait(1.6)
+	end
+end)
+
+------------------------------------------------------------------------
+-- HEADER
+------------------------------------------------------------------------
+local HD = Instance.new("Frame")
+HD.Size = UDim2.new(1, 0, 0, 52); HD.BackgroundColor3 = C.bg
+HD.BorderSizePixel = 0; HD.ZIndex = 5; HD.Parent = MF
+corner(14).Parent = HD
+local hdMask = Instance.new("Frame")
+hdMask.Size = UDim2.new(1, 0, 0, 14); hdMask.Position = UDim2.new(0, 0, 1, -14)
+hdMask.BackgroundColor3 = C.bg; hdMask.BorderSizePixel = 0; hdMask.ZIndex = 5; hdMask.Parent = HD
+local hdLine = Instance.new("Frame")
+hdLine.Size = UDim2.new(1, 0, 0, 2); hdLine.Position = UDim2.new(0, 0, 1, -2)
+hdLine.BackgroundColor3 = C.magenta; hdLine.BorderSizePixel = 0; hdLine.ZIndex = 6; hdLine.Parent = HD
+grad(C.magenta, C.cyan, 0).Parent = hdLine
+
+local logo = Instance.new("Frame")
+logo.Size = UDim2.new(0, 34, 0, 34); logo.Position = UDim2.new(0, 12, 0.5, -17)
+logo.BackgroundColor3 = C.magenta; logo.BorderSizePixel = 0; logo.ZIndex = 7; logo.Parent = HD
+corner(10).Parent = logo
+local logoGrad = grad(C.magenta, C.violet, 45); logoGrad.Parent = logo
+local logoGlow = stroke(C.magenta, 3, 0.4); logoGlow.Parent = logo
+local lgt = Instance.new("TextLabel")
+lgt.Size = UDim2.new(1, 0, 1, 0); lgt.BackgroundTransparency = 1
+lgt.Text = "P"; lgt.TextColor3 = Color3.new(1, 1, 1); lgt.TextSize = 19
+lgt.Font = Enum.Font.GothamBlack; lgt.ZIndex = 8; lgt.Parent = logo
+task.spawn(function()
+	while logo and logo.Parent and CFG.Running do
+		tw(logoGlow, 0.9, {Transparency = 0.05, Thickness = 4}, Enum.EasingStyle.Sine)
+		task.wait(0.9)
+		tw(logoGlow, 0.9, {Transparency = 0.5, Thickness = 2}, Enum.EasingStyle.Sine)
+		task.wait(0.9)
+	end
+end)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -190, 0, 18); title.Position = UDim2.new(0, 54, 0, 9)
+title.BackgroundTransparency = 1; title.Text = "PUSSYHUB"
+title.TextColor3 = Color3.new(1, 1, 1); title.TextSize = 15
+title.Font = Enum.Font.GothamBlack; title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 7; title.Parent = HD
+grad(C.magenta, C.cyan, 0).Parent = title
+
+local subtitle = Instance.new("TextLabel")
+subtitle.Size = UDim2.new(1, -190, 0, 12); subtitle.Position = UDim2.new(0, 54, 0, 30)
+subtitle.BackgroundTransparency = 1; subtitle.Text = "v1.0  //  GROW A GARDEN 2"
+subtitle.TextColor3 = C.textDim; subtitle.TextSize = 9
+subtitle.Font = Enum.Font.Gotham; subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.ZIndex = 7; subtitle.Parent = HD
+
+-- Window buttons
+local function mkWinBtn(xOff, col, glyph)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(0, 28, 0, 28); b.Position = UDim2.new(1, xOff, 0.5, -14)
+	b.BackgroundColor3 = C.panel; b.Text = ""; b.BorderSizePixel = 0
+	b.AutoButtonColor = false; b.ZIndex = 7; b.Parent = HD
+	corner(8).Parent = b
+	local bs = stroke(col, 1, 0.55); bs.Parent = b
+	local t = Instance.new("TextLabel")
+	t.Size = UDim2.new(1, 0, 1, 0); t.BackgroundTransparency = 1
+	t.Text = glyph; t.TextColor3 = col; t.TextSize = 15
+	t.Font = Enum.Font.GothamBold; t.ZIndex = 8; t.Parent = b
+	b.MouseEnter:Connect(function()
+		tw(b, 0.12, {BackgroundColor3 = col}, Enum.EasingStyle.Quad)
+		tw(t, 0.12, {TextColor3 = Color3.new(1, 1, 1)}, Enum.EasingStyle.Quad)
+	end)
+	b.MouseLeave:Connect(function()
+		tw(b, 0.12, {BackgroundColor3 = C.panel}, Enum.EasingStyle.Quad)
+		tw(t, 0.12, {TextColor3 = col}, Enum.EasingStyle.Quad)
+	end)
+	return b, t
+end
+
+local minBtn, minBtnTxt = mkWinBtn(-66, C.amber, "-")
+local closeBtn = mkWinBtn(-32, C.red, "X")
+
+------------------------------------------------------------------------
+-- DRAG
+------------------------------------------------------------------------
+local dragging, dragStart, startPos = false, nil, nil
+HD.InputBegan:Connect(function(inp)
+	if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+		dragging = true; dragStart = inp.Position; startPos = MF.Position
+	end
+end)
+UIS.InputEnded:Connect(function(inp)
+	if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+UIS.InputChanged:Connect(function(inp)
+	if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+		local d = inp.Position - dragStart
+		MF.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	end
+end)
+
+------------------------------------------------------------------------
+-- SIDEBAR TABS + PANELS
+------------------------------------------------------------------------
+local TABS = {
+	{name = "Auto",    glyph = "A", col = C.cyan},
+	{name = "Steal",   glyph = "S", col = C.magenta},
+	{name = "Player",  glyph = "P", col = C.lime},
+	{name = "ESP",     glyph = "E", col = C.violet},
+	{name = "TP",      glyph = "T", col = C.amber},
+	{name = "Perf",    glyph = "~", col = C.red},
+	{name = "Log",     glyph = "L", col = C.textDim},
+}
+
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 104, 1, -118); sidebar.Position = UDim2.new(0, 8, 0, 60)
+sidebar.BackgroundColor3 = C.bg; sidebar.BorderSizePixel = 0
+sidebar.ZIndex = 5; sidebar.Parent = MF
+corner(10).Parent = sidebar
+stroke(C.stroke, 1, 0.4).Parent = sidebar
+local sbLay = Instance.new("UIListLayout")
+sbLay.Padding = UDim.new(0, 4); sbLay.HorizontalAlignment = Enum.HorizontalAlignment.Center
+sbLay.Parent = sidebar
+local sbPad = Instance.new("UIPadding")
+sbPad.PaddingTop = UDim.new(0, 6); sbPad.Parent = sidebar
+
+local panelHolder = Instance.new("Frame")
+panelHolder.Size = UDim2.new(1, -128, 1, -118); panelHolder.Position = UDim2.new(0, 120, 0, 60)
+panelHolder.BackgroundColor3 = C.bg; panelHolder.BorderSizePixel = 0
+panelHolder.ClipsDescendants = true; panelHolder.ZIndex = 5; panelHolder.Parent = MF
+corner(10).Parent = panelHolder
+stroke(C.stroke, 1, 0.4).Parent = panelHolder
+
+local TabBtns, TabPanels = {}, {}
+for _, t in ipairs(TABS) do
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -10, 0, 34)
+	b.BackgroundColor3 = C.panel; b.Text = ""
+	b.BorderSizePixel = 0; b.AutoButtonColor = false; b.ZIndex = 6; b.Parent = sidebar
+	corner(8).Parent = b
+	local bar = Instance.new("Frame")
+	bar.Size = UDim2.new(0, 3, 0.55, 0); bar.Position = UDim2.new(0, 0, 0.225, 0)
+	bar.BackgroundColor3 = t.col; bar.BackgroundTransparency = 0.75
+	bar.BorderSizePixel = 0; bar.ZIndex = 7; bar.Parent = b
+	corner(3).Parent = bar
+	local gl = Instance.new("TextLabel")
+	gl.Size = UDim2.new(0, 22, 1, 0); gl.Position = UDim2.new(0, 8, 0, 0)
+	gl.BackgroundTransparency = 1; gl.Text = t.glyph; gl.TextColor3 = t.col
+	gl.TextSize = 13; gl.Font = Enum.Font.GothamBlack; gl.ZIndex = 7; gl.Parent = b
+	local lb = Instance.new("TextLabel")
+	lb.Size = UDim2.new(1, -32, 1, 0); lb.Position = UDim2.new(0, 30, 0, 0)
+	lb.BackgroundTransparency = 1; lb.Text = t.name; lb.TextColor3 = C.textDim
+	lb.TextSize = 11; lb.Font = Enum.Font.GothamBold
+	lb.TextXAlignment = Enum.TextXAlignment.Left; lb.ZIndex = 7; lb.Parent = b
+	TabBtns[t.name] = {btn = b, bar = bar, label = lb, glyph = gl, col = t.col}
+
+	local p = Instance.new("ScrollingFrame")
+	p.Name = t.name; p.Size = UDim2.new(1, 0, 1, 0)
+	p.BackgroundTransparency = 1; p.BorderSizePixel = 0
+	p.ScrollBarThickness = 3; p.ScrollBarImageColor3 = t.col
+	p.CanvasSize = UDim2.new(0, 0, 0, 0); p.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	p.Visible = false; p.ZIndex = 6; p.Parent = panelHolder
+	local pl = Instance.new("UIListLayout")
+	pl.Padding = UDim.new(0, 5); pl.Parent = p
+	local pp = Instance.new("UIPadding")
+	pp.PaddingTop = UDim.new(0, 8); pp.PaddingBottom = UDim.new(0, 8)
+	pp.PaddingLeft = UDim.new(0, 8); pp.PaddingRight = UDim.new(0, 8)
+	pp.Parent = p
+	TabPanels[t.name] = p
+end
+
+------------------------------------------------------------------------
+-- UI COMPONENTS
+------------------------------------------------------------------------
+local function mkSec(par, txt, col)
+	col = col or C.cyan
+	local s = Instance.new("TextLabel")
+	s.Size = UDim2.new(1, 0, 0, 18); s.BackgroundTransparency = 1
+	s.Text = txt; s.TextColor3 = col; s.TextSize = 11; s.Font = Enum.Font.GothamBlack
+	s.TextXAlignment = Enum.TextXAlignment.Left; s.ZIndex = 7; s.Parent = par
+	local u = Instance.new("Frame")
+	u.Size = UDim2.new(0.4, 0, 0, 2); u.Position = UDim2.new(0, 1, 1, -3)
+	u.BackgroundColor3 = col; u.BorderSizePixel = 0; u.ZIndex = 7; u.Parent = s
+	corner(2).Parent = u
+	grad(col, C.bg, 0).Parent = u
+end
+
+local function mkLabel(par, txt)
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.new(1, 0, 0, 14); l.BackgroundTransparency = 1
+	l.Text = txt; l.TextColor3 = C.textDim; l.TextSize = 9; l.Font = Enum.Font.Gotham
+	l.TextXAlignment = Enum.TextXAlignment.Left; l.TextWrapped = true
+	l.AutomaticSize = Enum.AutomaticSize.Y; l.ZIndex = 7; l.Parent = par
+end
+
+local function mkToggle(par, txt, def, col, cb)
+	col = col or C.cyan
+	local f = Instance.new("Frame")
+	f.Size = UDim2.new(1, 0, 0, 32); f.BackgroundColor3 = C.panel
+	f.BorderSizePixel = 0; f.ZIndex = 7; f.Parent = par
+	corner(8).Parent = f
+	stroke(C.stroke, 1, 0.5).Parent = f
+	local bar = Instance.new("Frame")
+	bar.Size = UDim2.new(0, 3, 0.5, 0); bar.Position = UDim2.new(0, 0, 0.25, 0)
+	bar.BackgroundColor3 = col; bar.BackgroundTransparency = def and 0 or 0.8
+	bar.BorderSizePixel = 0; bar.ZIndex = 8; bar.Parent = f
+	corner(3).Parent = bar
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -62, 1, 0); lbl.Position = UDim2.new(0, 10, 0, 0)
+	lbl.BackgroundTransparency = 1; lbl.Text = txt
+	lbl.TextColor3 = def and C.text or C.textDim; lbl.TextSize = 11
+	lbl.Font = Enum.Font.GothamMedium; lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.ZIndex = 8; lbl.Parent = f
+	local trk = Instance.new("Frame")
+	trk.Size = UDim2.new(0, 38, 0, 20); trk.Position = UDim2.new(1, -48, 0.5, -10)
+	trk.BackgroundColor3 = def and col or C.panel3
+	trk.BorderSizePixel = 0; trk.ZIndex = 8; trk.Parent = f
+	corner(999).Parent = trk
+	local trkGlow = stroke(col, 2, def and 0.25 or 1); trkGlow.Parent = trk
+	local kn = Instance.new("Frame")
+	kn.Size = UDim2.new(0, 14, 0, 14); kn.Position = UDim2.new(0, def and 21 or 3, 0.5, -7)
+	kn.BackgroundColor3 = Color3.new(1, 1, 1); kn.BorderSizePixel = 0
+	kn.ZIndex = 9; kn.Parent = trk
+	corner(999).Parent = kn
+	local knGlow = stroke(col, 2, def and 0.1 or 1); knGlow.Parent = kn
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 1, 0); btn.BackgroundTransparency = 1
+	btn.Text = ""; btn.AutoButtonColor = false; btn.ZIndex = 10; btn.Parent = f
+	local state = def
+	f.MouseEnter:Connect(function() tw(f, 0.1, {BackgroundColor3 = C.panel2}, Enum.EasingStyle.Quad) end)
+	f.MouseLeave:Connect(function() tw(f, 0.1, {BackgroundColor3 = C.panel}, Enum.EasingStyle.Quad) end)
+	btn.MouseButton1Click:Connect(function()
+		state = not state
+		ripple(f, f.AbsoluteSize.X - 30, f.AbsoluteSize.Y / 2, col)
+		tw(kn, 0.22, {Position = UDim2.new(0, state and 21 or 3, 0.5, -7)}, Enum.EasingStyle.Back)
+		tw(trk, 0.2, {BackgroundColor3 = state and col or C.panel3}, Enum.EasingStyle.Quad)
+		tw(bar, 0.2, {BackgroundTransparency = state and 0 or 0.8}, Enum.EasingStyle.Quad)
+		tw(lbl, 0.2, {TextColor3 = state and C.text or C.textDim}, Enum.EasingStyle.Quad)
+		tw(trkGlow, 0.2, {Transparency = state and 0.25 or 1}, Enum.EasingStyle.Quad)
+		tw(knGlow, 0.2, {Transparency = state and 0.1 or 1}, Enum.EasingStyle.Quad)
+		if cb then cb(state) end
+	end)
+end
+
+local function mkBtn(par, txt, col, cb)
+	col = col or C.cyan
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, 0, 0, 32); b.BackgroundColor3 = C.panel
+	b.BorderSizePixel = 0; b.Text = ""; b.AutoButtonColor = false; b.ZIndex = 7; b.Parent = par
+	corner(8).Parent = b
+	local bs = stroke(col, 1, 0.6); bs.Parent = b
+	local bar = Instance.new("Frame")
+	bar.Size = UDim2.new(0, 3, 0.45, 0); bar.Position = UDim2.new(0, 0, 0.275, 0)
+	bar.BackgroundColor3 = col; bar.BorderSizePixel = 0; bar.ZIndex = 8; bar.Parent = b
+	corner(3).Parent = bar
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -12, 1, 0); lbl.Position = UDim2.new(0, 12, 0, 0)
+	lbl.BackgroundTransparency = 1; lbl.Text = txt; lbl.TextColor3 = C.text
+	lbl.TextSize = 11; lbl.Font = Enum.Font.GothamBold
+	lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.ZIndex = 8; lbl.Parent = b
+	b.MouseEnter:Connect(function()
+		tw(b, 0.12, {BackgroundColor3 = C.panel2}, Enum.EasingStyle.Quad)
+		tw(bs, 0.12, {Transparency = 0.1}, Enum.EasingStyle.Quad)
+	end)
+	b.MouseLeave:Connect(function()
+		tw(b, 0.12, {BackgroundColor3 = C.panel}, Enum.EasingStyle.Quad)
+		tw(bs, 0.12, {Transparency = 0.6}, Enum.EasingStyle.Quad)
+	end)
+	b.MouseButton1Click:Connect(function()
+		ripple(b, b.AbsoluteSize.X / 2, b.AbsoluteSize.Y / 2, col)
+		if cb then cb() end
+	end)
+end
+
+local function mkSlider(par, lblTxt, min, max, def, step, col, cb)
+	col = col or C.cyan
+	step = step or 1
+	local decimals = (step < 1) and 2 or 0
+	local function snap(v)
+		v = math.clamp(v, min, max)
+		return min + math.floor((v - min) / step + 0.5) * step
+	end
+	local function fmt(v)
+		if decimals > 0 then return string.format("%." .. decimals .. "f", v) end
+		return tostring(math.floor(v + 0.5))
+	end
+	local f = Instance.new("Frame")
+	f.Size = UDim2.new(1, 0, 0, 44); f.BackgroundColor3 = C.panel
+	f.BorderSizePixel = 0; f.ZIndex = 7; f.Parent = par
+	corner(8).Parent = f
+	stroke(C.stroke, 1, 0.5).Parent = f
+	local l2 = Instance.new("TextLabel")
+	l2.Size = UDim2.new(1, -70, 0, 16); l2.Position = UDim2.new(0, 10, 0, 4)
+	l2.BackgroundTransparency = 1; l2.Text = lblTxt; l2.TextColor3 = C.text
+	l2.TextSize = 11; l2.Font = Enum.Font.GothamMedium
+	l2.TextXAlignment = Enum.TextXAlignment.Left; l2.ZIndex = 8; l2.Parent = f
+	local vl = Instance.new("TextLabel")
+	vl.Size = UDim2.new(0, 58, 0, 16); vl.Position = UDim2.new(1, -66, 0, 4)
+	vl.BackgroundTransparency = 1; vl.Text = fmt(def); vl.TextColor3 = col
+	vl.TextSize = 12; vl.Font = Enum.Font.GothamBold
+	vl.TextXAlignment = Enum.TextXAlignment.Right; vl.ZIndex = 8; vl.Parent = f
+	local trk = Instance.new("Frame")
+	trk.Size = UDim2.new(1, -20, 0, 6); trk.Position = UDim2.new(0, 10, 0, 28)
+	trk.BackgroundColor3 = C.panel3; trk.BorderSizePixel = 0; trk.ZIndex = 8; trk.Parent = f
+	corner(999).Parent = trk
+	local pct = math.clamp((def - min) / math.max(1e-9, max - min), 0, 1)
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(pct, 0, 1, 0); fill.BackgroundColor3 = col
+	fill.BorderSizePixel = 0; fill.ZIndex = 9; fill.Parent = trk
+	corner(999).Parent = fill
+	grad(col, C.violet, 0).Parent = fill
+	local kn = Instance.new("Frame")
+	kn.Size = UDim2.new(0, 14, 0, 14); kn.Position = UDim2.new(pct, -7, 0.5, -7)
+	kn.BackgroundColor3 = Color3.new(1, 1, 1); kn.BorderSizePixel = 0
+	kn.ZIndex = 10; kn.Parent = trk
+	corner(999).Parent = kn
+	stroke(col, 2, 0.15).Parent = kn
+	local sd = false
+	local function upd(x)
+		local rel = math.clamp((x - trk.AbsolutePosition.X) / math.max(1, trk.AbsoluteSize.X), 0, 1)
+		local val = snap(min + (max - min) * rel)
+		local rpct = (val - min) / math.max(1e-9, max - min)
+		tw(fill, 0.08, {Size = UDim2.new(rpct, 0, 1, 0)}, Enum.EasingStyle.Quad)
+		tw(kn, 0.08, {Position = UDim2.new(rpct, -7, 0.5, -7)}, Enum.EasingStyle.Quad)
+		vl.Text = fmt(val)
+		if cb then cb(val) end
+	end
+	trk.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+			sd = true; upd(inp.Position.X)
+		end
+	end)
+	trk.InputEnded:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+			sd = false
+		end
+	end)
+	UIS.InputChanged:Connect(function(inp)
+		if sd and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+			upd(inp.Position.X)
+		end
+	end)
+end
+
+------------------------------------------------------------------------
+-- STATUS BAR
+------------------------------------------------------------------------
+local SB = Instance.new("Frame")
+SB.Size = UDim2.new(1, -16, 0, 50); SB.Position = UDim2.new(0, 8, 1, -58)
+SB.BackgroundColor3 = C.bg; SB.BorderSizePixel = 0; SB.ZIndex = 10; SB.Parent = MF
+corner(10).Parent = SB
+local sbStroke = stroke(C.magenta, 1, 0.35); sbStroke.Parent = SB
+grad(C.magenta, C.cyan, 0).Parent = sbStroke
+
+local actionTxt = Instance.new("TextLabel")
+actionTxt.Size = UDim2.new(0.5, -8, 0, 20); actionTxt.Position = UDim2.new(0, 12, 0, 5)
+actionTxt.BackgroundTransparency = 1; actionTxt.Text = "IDLE"
+actionTxt.TextColor3 = C.cyan; actionTxt.TextSize = 15
+actionTxt.Font = Enum.Font.GothamBlack; actionTxt.TextXAlignment = Enum.TextXAlignment.Left
+actionTxt.ZIndex = 11; actionTxt.Parent = SB
+
+task.spawn(function()
+	while actionTxt and actionTxt.Parent and CFG.Running do
+		tw(actionTxt, 1.4, {TextTransparency = 0.25}, Enum.EasingStyle.Sine)
+		task.wait(1.4)
+		tw(actionTxt, 1.4, {TextTransparency = 0}, Enum.EasingStyle.Sine)
+		task.wait(1.4)
+	end
+end)
+
+local subTxt = Instance.new("TextLabel")
+subTxt.Size = UDim2.new(0.5, -8, 0, 14); subTxt.Position = UDim2.new(0, 12, 0, 28)
+subTxt.BackgroundTransparency = 1; subTxt.Text = "Fruits: 0/10 | OK | DAY"
+subTxt.TextColor3 = C.textDim; subTxt.TextSize = 10
+subTxt.Font = Enum.Font.GothamBold; subTxt.TextXAlignment = Enum.TextXAlignment.Left
+subTxt.ZIndex = 11; subTxt.Parent = SB
+
+local pillRow = Instance.new("Frame")
+pillRow.Size = UDim2.new(0.5, -8, 1, -10); pillRow.Position = UDim2.new(0.5, 0, 0, 5)
+pillRow.BackgroundTransparency = 1; pillRow.ZIndex = 11; pillRow.Parent = SB
+local prl = Instance.new("UIListLayout")
+prl.FillDirection = Enum.FillDirection.Horizontal
+prl.Padding = UDim.new(0, 4)
+prl.HorizontalAlignment = Enum.HorizontalAlignment.Right
+prl.VerticalAlignment = Enum.VerticalAlignment.Center
+prl.Parent = pillRow
+
+local function mkPill(txt, col)
+	local p = Instance.new("Frame")
+	p.Size = UDim2.new(0, 56, 0, 20)
+	p.BackgroundColor3 = C.panel; p.BorderSizePixel = 0; p.ZIndex = 11; p.Parent = pillRow
+	corner(6).Parent = p
+	stroke(col, 1, 0.45).Parent = p
+	local d2 = Instance.new("Frame")
+	d2.Size = UDim2.new(0, 5, 0, 5); d2.Position = UDim2.new(0, 6, 0.5, -2.5)
+	d2.BackgroundColor3 = col; d2.BorderSizePixel = 0; d2.ZIndex = 12; d2.Parent = p
+	corner(999).Parent = d2
+	local tx = Instance.new("TextLabel")
+	tx.Size = UDim2.new(1, -16, 1, 0); tx.Position = UDim2.new(0, 15, 0, 0)
+	tx.BackgroundTransparency = 1; tx.Text = txt; tx.TextColor3 = C.text
+	tx.TextSize = 9; tx.Font = Enum.Font.GothamBold
+	tx.TextXAlignment = Enum.TextXAlignment.Left; tx.ZIndex = 12; tx.Parent = p
+	return tx
+end
+local harvestPill = mkPill("H 0", C.cyan)
+local stealPill   = mkPill("S 0", C.magenta)
+local sellPill    = mkPill("$ 0", C.lime)
+local valuePill   = mkPill("V 0", C.amber)
+
+------------------------------------------------------------------------
+-- LOG + NOTIFICATIONS
+------------------------------------------------------------------------
+addLog = function(txt, col)
+	col = col or C.text
+	local line = os.date("%H:%M:%S") .. " " .. tostring(txt)
+	pcall(function()
+		local e = Instance.new("TextLabel")
+		e.Size = UDim2.new(1, 0, 0, 16); e.BackgroundColor3 = C.panel
+		e.BorderSizePixel = 0; e.Text = " " .. line; e.TextColor3 = col
+		e.TextSize = 9; e.Font = Enum.Font.Code
+		e.TextXAlignment = Enum.TextXAlignment.Left; e.TextTransparency = 1
+		e.ZIndex = 7; e.Parent = TabPanels.Log
+		corner(4).Parent = e
+		tw(e, 0.25, {TextTransparency = 0}, Enum.EasingStyle.Quad)
+	end)
+end
+
+local toastHolder = Instance.new("Frame")
+toastHolder.Size = UDim2.new(0, 240, 1, 0); toastHolder.Position = UDim2.new(1, -252, 0, 12)
+toastHolder.BackgroundTransparency = 1; toastHolder.ZIndex = 90; toastHolder.Parent = SG
+local thl = Instance.new("UIListLayout")
+thl.Padding = UDim.new(0, 6); thl.VerticalAlignment = Enum.VerticalAlignment.Top
+thl.HorizontalAlignment = Enum.HorizontalAlignment.Right; thl.Parent = toastHolder
+
+notify = function(title, msg, col)
+	col = col or C.cyan
+	pcall(function()
+		if #toastHolder:GetChildren() > 6 then return end
+		local t = Instance.new("Frame")
+		t.Size = UDim2.new(1, 0, 0, 46); t.BackgroundColor3 = C.bg2
+		t.BorderSizePixel = 0; t.ZIndex = 91; t.Parent = toastHolder
+		t.Position = UDim2.new(0, 260, 0, 0)
+		corner(10).Parent = t
+		local ts = stroke(col, 1.5, 0.2); ts.Parent = t
+		local bar = Instance.new("Frame")
+		bar.Size = UDim2.new(0, 3, 0.6, 0); bar.Position = UDim2.new(0, 0, 0.2, 0)
+		bar.BackgroundColor3 = col; bar.BorderSizePixel = 0; bar.ZIndex = 92; bar.Parent = t
+		corner(3).Parent = bar
+		local tt = Instance.new("TextLabel")
+		tt.Size = UDim2.new(1, -16, 0, 16); tt.Position = UDim2.new(0, 12, 0, 5)
+		tt.BackgroundTransparency = 1; tt.Text = title; tt.TextColor3 = col
+		tt.TextSize = 12; tt.Font = Enum.Font.GothamBlack
+		tt.TextXAlignment = Enum.TextXAlignment.Left; tt.ZIndex = 92; tt.Parent = t
+		local tm = Instance.new("TextLabel")
+		tm.Size = UDim2.new(1, -16, 0, 14); tm.Position = UDim2.new(0, 12, 0, 24)
+		tm.BackgroundTransparency = 1; tm.Text = msg; tm.TextColor3 = C.text
+		tm.TextSize = 10; tm.Font = Enum.Font.Gotham
+		tm.TextXAlignment = Enum.TextXAlignment.Left; tm.ZIndex = 92; tm.Parent = t
+		tw(t, 0.35, {Position = UDim2.new(0, 0, 0, 0)}, Enum.EasingStyle.Back)
+		task.spawn(function()
+			task.wait(3)
+			tw(t, 0.3, {Position = UDim2.new(0, 260, 0, 0), BackgroundTransparency = 1}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+			task.wait(0.35)
+			t:Destroy()
+		end)
+	end)
+end
+
+------------------------------------------------------------------------
+-- TAB CONTENTS
+------------------------------------------------------------------------
+mkSec(TabPanels.Auto, "MASTER", C.magenta)
+mkToggle(TabPanels.Auto, "AUTO PROGRESS (master)", false, C.magenta, function(v)
+	CFG.AutoProgress = v
+	addLog("Auto progress: " .. (v and "ON" or "OFF"), v and C.lime or C.red)
+	notify("Automation", v and "Auto progress enabled" or "Auto progress paused", v and C.lime or C.red)
+end)
+mkSec(TabPanels.Auto, "FEATURES", C.cyan)
+mkToggle(TabPanels.Auto, "Auto Harvest", true, C.cyan, function(v) CFG.AutoHarvest = v end)
+mkToggle(TabPanels.Auto, "Auto Sell (every cycle)", false, C.lime, function(v) CFG.AutoSell = v end)
+mkToggle(TabPanels.Auto, "Sell When Full", true, C.lime, function(v) CFG.AutoSellWhenFull = v end)
+mkToggle(TabPanels.Auto, "Auto Collect (sheckles)", true, C.violet, function(v) CFG.AutoCollect = v end)
+mkToggle(TabPanels.Auto, "Remote Fire (no teleport)", true, C.amber, function(v) CFG.SpoofMode = v end)
+mkToggle(TabPanels.Auto, "Sell: teleport to NPC", true, C.amber, function(v) CFG.SellTeleport = v end)
+mkSec(TabPanels.Auto, "TUNING", C.amber)
+mkSlider(TabPanels.Auto, "Per-Plant Delay", 0.01, 0.5, 0.05, 0.01, C.amber, function(v) CFG.HarvestDelay = v end)
+mkSlider(TabPanels.Auto, "Full Inventory At", 2, 50, 10, 1, C.lime, function(v) CFG.FullInventoryThreshold = v end)
+mkSec(TabPanels.Auto, "ACTIONS", C.cyan)
+mkBtn(TabPanels.Auto, "Harvest Now (value order)", C.cyan, function() task.spawn(DoHarvest) end)
+mkBtn(TabPanels.Auto, "Sell Now (sell all)", C.lime, function() task.spawn(DoSell) end)
+mkBtn(TabPanels.Auto, "Scan Garden", C.violet, ScanGarden)
+
+mkSec(TabPanels.Steal, "STEAL", C.magenta)
+mkToggle(TabPanels.Steal, "Auto Steal (night only)", false, C.magenta, function(v) CFG.AutoSteal = v end)
+mkLabel(TabPanels.Steal, "Steal prompts only enable at night in GAG2. Use Steal Now to force-try anytime.")
+mkSec(TabPanels.Steal, "ACTIONS", C.magenta)
+mkBtn(TabPanels.Steal, "Find Stealable", C.cyan, FindStealable)
+mkBtn(TabPanels.Steal, "Steal Now (force)", C.magenta, function() task.spawn(function() DoSteal(true) end) end)
+
+mkSec(TabPanels.Player, "MOVEMENT", C.lime)
+mkToggle(TabPanels.Player, "Speed Hack", false, C.lime, function(v)
+	CFG.SpeedHack = v
+	pcall(function()
+		local c = P.Character
+		if c and c:FindFirstChild("Humanoid") then
+			c.Humanoid.WalkSpeed = v and CFG.WalkSpeed or 16
+		end
+	end)
+end)
+mkToggle(TabPanels.Player, "Jump Hack", false, C.lime, function(v)
+	CFG.JumpHack = v
+	pcall(function()
+		local c = P.Character
+		if c and c:FindFirstChild("Humanoid") then
+			c.Humanoid.JumpPower = v and CFG.JumpPower or 50
+		end
+	end)
+end)
+mkToggle(TabPanels.Player, "Noclip", false, C.violet, function(v)
+	CFG.Noclip = v
+	if not v then
+		pcall(function()
+			local c = P.Character
+			if c then
+				for _, part in pairs(c:GetDescendants()) do
+					if part:IsA("BasePart") then part.CanCollide = true end
+				end
+			end
+		end)
+	end
+end)
+mkSlider(TabPanels.Player, "Walk Speed", 16, 500, 80, 1, C.lime, function(v) CFG.WalkSpeed = v end)
+mkSlider(TabPanels.Player, "Jump Power", 50, 500, 120, 1, C.violet, function(v) CFG.JumpPower = v end)
+
+mkSec(TabPanels.ESP, "VISUAL", C.violet)
+mkToggle(TabPanels.ESP, "Plant ESP (my garden)", false, C.lime, function(v) CFG.PlantESP = v end)
+mkToggle(TabPanels.ESP, "Steal ESP (other gardens)", false, C.magenta, function(v) CFG.StealESP = v end)
+mkToggle(TabPanels.ESP, "Value ESP (fruit prices)", false, C.cyan, function(v) CFG.ValueESP = v end)
+mkLabel(TabPanels.ESP, "Value colors: <30 cyan, 30-59 amber, 60-99 magenta, 100+ violet.")
+mkLabel(TabPanels.ESP, "Value ESP covers ripe fruits on plants, dropped tools, and fruits other players carry.")
+
+mkSec(TabPanels.TP, "TELEPORT", C.amber)
+mkBtn(TabPanels.TP, "My Garden", C.lime, TeleportToMyGarden)
+mkBtn(TabPanels.TP, "Sell Stand", C.amber, TeleportToSellStand)
+mkSec(TabPanels.TP, "NPCS", C.cyan)
+mkBtn(TabPanels.TP, "Steven (SELL)", C.lime, function() TeleportToNPC("Steven") end)
+mkBtn(TabPanels.TP, "Sam", C.cyan, function() TeleportToNPC("Sam") end)
+mkBtn(TabPanels.TP, "Charlotte", C.cyan, function() TeleportToNPC("Charlotte") end)
+mkBtn(TabPanels.TP, "Gilbert", C.violet, function() TeleportToNPC("Gilbert") end)
+mkBtn(TabPanels.TP, "George (GEAR)", C.red, function() TeleportToNPC("George") end)
+
+mkSec(TabPanels.Perf, "PERFORMANCE", C.red)
+mkToggle(TabPanels.Perf, "PERF MODE", false, C.red, function(v)
+	CFG.PerfMode = v
+	ApplyPerfMode(v)
+end)
+mkBtn(TabPanels.Perf, "FPS Boost", C.amber, function() ApplyPerfMode(true) end)
+mkBtn(TabPanels.Perf, "Restore Quality", C.cyan, function() ApplyPerfMode(false) end)
+mkSec(TabPanels.Perf, "DEBUG", C.violet)
+mkBtn(TabPanels.Perf, "Debug Remotes (capped)", C.violet, DebugRemotes)
+
+mkBtn(TabPanels.Log, "Clear Log", C.red, function()
+	for _, c in pairs(TabPanels.Log:GetChildren()) do
+		if c:IsA("TextLabel") then c:Destroy() end
+	end
+	addLog("Log cleared", C.textDim)
+end)
+
+------------------------------------------------------------------------
+-- TAB SWITCHING
+------------------------------------------------------------------------
+local function switchTab(name)
+	if CFG.ActiveTab == name and TabPanels[name].Visible then return end
+	CFG.ActiveTab = name
+	for n, p in pairs(TabPanels) do p.Visible = (n == name) end
+	for n, t in pairs(TabBtns) do
+		local active = (n == name)
+		tw(t.btn, 0.2, {BackgroundColor3 = active and C.panel3 or C.panel}, Enum.EasingStyle.Quad)
+		tw(t.bar, 0.2, {BackgroundTransparency = active and 0 or 0.75}, Enum.EasingStyle.Quad)
+		tw(t.label, 0.2, {TextColor3 = active and C.text or C.textDim}, Enum.EasingStyle.Quad)
+		if active then ripple(t.btn, 20, t.btn.AbsoluteSize.Y / 2, t.col) end
+	end
+end
+for n, t in pairs(TabBtns) do
+	t.btn.MouseButton1Click:Connect(function() switchTab(n) end)
+end
+switchTab("Auto")
+
+------------------------------------------------------------------------
+-- MINIMIZE / CLOSE
+------------------------------------------------------------------------
+local MINIMIZED = false
+local savedSize, savedPos = MF.Size, MF.Position
+minBtn.MouseButton1Click:Connect(function()
+	MINIMIZED = not MINIMIZED
+	if MINIMIZED then
+		savedSize, savedPos = MF.Size, MF.Position
+		sidebar.Visible = false; panelHolder.Visible = false; SB.Visible = false
+		minBtnTxt.Text = "+"
+		tw(MF, 0.3, {Size = UDim2.new(0, 320, 0, 52)}, Enum.EasingStyle.Back)
+	else
+		minBtnTxt.Text = "-"
+		tw(MF, 0.3, {Size = savedSize, Position = savedPos}, Enum.EasingStyle.Back)
+		task.wait(0.15)
+		sidebar.Visible = true; panelHolder.Visible = true; SB.Visible = true
+	end
+end)
+closeBtn.MouseButton1Click:Connect(function()
+	CFG.Running = false
+	clearESP()
+	tw(MF, 0.3, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+	task.wait(0.35)
+	SG:Destroy()
+end)
+
+------------------------------------------------------------------------
+-- FLOATING BUBBLE + RIGHTSHIFT TOGGLE
+------------------------------------------------------------------------
+local bubble = Instance.new("TextButton")
+bubble.Size = UDim2.new(0, 44, 0, 44); bubble.Position = UDim2.new(0, 16, 0.5, -22)
+bubble.BackgroundColor3 = C.bg2; bubble.Text = ""; bubble.BorderSizePixel = 0
+bubble.AutoButtonColor = false; bubble.ZIndex = 80; bubble.Parent = SG
+corner(999).Parent = bubble
+grad(C.magenta, C.violet, 45).Parent = bubble
+local bubbleGlow = stroke(C.magenta, 3, 0.15); bubbleGlow.Parent = bubble
+local bbt = Instance.new("TextLabel")
+bbt.Size = UDim2.new(1, 0, 1, 0); bbt.BackgroundTransparency = 1
+bbt.Text = "P"; bbt.TextColor3 = Color3.new(1, 1, 1); bbt.TextSize = 20
+bbt.Font = Enum.Font.GothamBlack; bbt.ZIndex = 81; bbt.Parent = bubble
+task.spawn(function()
+	while bubble and bubble.Parent and CFG.Running do
+		tw(bubbleGlow, 1.0, {Transparency = 0.55, Thickness = 2}, Enum.EasingStyle.Sine)
+		task.wait(1.0)
+		tw(bubbleGlow, 1.0, {Transparency = 0.1, Thickness = 4}, Enum.EasingStyle.Sine)
+		task.wait(1.0)
+	end
+end)
+
+local function toggleUI()
+	if MINIMIZED then return end
+	MF.Visible = not MF.Visible
+	if MF.Visible then
+		MF.Size = UDim2.new(0, 0, 0, 0)
+		tw(MF, 0.4, {Size = savedSize}, Enum.EasingStyle.Back)
+	end
+end
+bubble.MouseButton1Click:Connect(toggleUI)
+UIS.InputBegan:Connect(function(inp, gpe)
+	if gpe then return end
+	if inp.KeyCode == Enum.KeyCode.RightShift then toggleUI() end
+end)
+
+-- bubble drag
+local bDrag, bStart, bPos = false, nil, nil
+bubble.InputBegan:Connect(function(inp)
+	if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+		bDrag = true; bStart = inp.Position; bPos = bubble.Position
+	end
+end)
+UIS.InputEnded:Connect(function(inp)
+	if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then bDrag = false end
+end)
+UIS.InputChanged:Connect(function(inp)
+	if bDrag and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+		local d = inp.Position - bStart
+		bubble.Position = UDim2.new(bPos.X.Scale, bPos.X.Offset + d.X, bPos.Y.Scale, bPos.Y.Offset + d.Y)
+	end
+end)
+
+------------------------------------------------------------------------
+-- MAIN AUTO LOOP (clean lifecycle, no spam scans)
+------------------------------------------------------------------------
+addLog("PussyHub GAG2 loaded!", C.lime)
+notify("PussyHub", "GAG2 Module loaded", C.lime)
+
+task.spawn(function()
+	while CFG.Running do
+		task.wait(0.5)
+
+		-- Harvest
+		if CFG.Running and CFG.AutoHarvest then
+			DoHarvest(true)
+		end
+
+		-- Collect drops
+		if CFG.Running and CFG.AutoCollect then
+			doCollect()
+		end
+
+		-- Sell when full
+		local fc = 0
+		if CFG.AutoSellWhenFull or CFG.AutoSell then
+			fc = getFruitCount()
+			if CFG.AutoSell and CFG.Running then
+				DoSell()
+			elseif CFG.AutoSellWhenFull and CFG.Running and fc >= CFG.FullInventoryThreshold then
+				DoSell()
+			end
+		end
+
+		-- Steal
+		if CFG.Running and CFG.AutoSteal then
+			DoSteal(false)
+		end
+
+		-- Speed/Jump hack apply
+		if CFG.Running and CFG.SpeedHack then
+			pcall(function()
+				local c = P.Character
+				if c and c:FindFirstChild("Humanoid") then
+					c.Humanoid.WalkSpeed = CFG.WalkSpeed
+				end
+			end)
+		end
+		if CFG.Running and CFG.JumpHack then
+			pcall(function()
+				local c = P.Character
+				if c and c:FindFirstChild("Humanoid") then
+					c.Humanoid.JumpPower = CFG.JumpPower
+				end
+			end)
+		end
+
+		-- Noclip
+		if CFG.Running and CFG.Noclip then
+			pcall(function()
+				local c = P.Character
+				if c then
+					for _, part in pairs(c:GetDescendants()) do
+						if part:IsA("BasePart") then part.CanCollide = false end
+					end
+				end
+			end)
+		end
+
+		-- Status bar
+		if CFG.Running then
+			local fcStatus = getFruitCount()
+			local dayNight = isNightTime() and "NIGHT" or "DAY"
+			subTxt.Text = "Fruits: " .. fcStatus .. "/" .. CFG.FullInventoryThreshold .. " | " .. dayNight
+			harvestPill.Text = "H " .. CFG.HarvestCount
+			stealPill.Text = "S " .. CFG.StealCount
+			sellPill.Text = "$ " .. CFG.SellCount
+			valuePill.Text = "V " .. CFG.ValueCollected
+		end
+
+		-- ESP
+		if CFG.Running then
+			doESP()
+		end
+
+		-- Longer sleep between full cycles (don't spam)
+		task.wait(0.8)
+	end
+end)
+
+print("[GAG2] PussyHub module loaded on " .. P.Name)
