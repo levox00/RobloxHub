@@ -42,10 +42,10 @@ local success, Window = pcall(function()
 			Enabled = true,
 			Draggable = true,
 			Scale = 0.5,
-		Color = ColorSequence.new(
-			Color3.fromHex("#4a7ab5"),
-			Color3.fromHex("#8fa8cc")
-		),
+			Color = ColorSequence.new(
+				Color3.fromHex("#4a7ab5"),
+				Color3.fromHex("#8fa8cc")
+			),
 		},
 	})
 end)
@@ -73,7 +73,6 @@ local UtilsTab = Window:Tab({
 
 local wsEnabled = false
 local wsSpeed = 16
-local wsConn
 
 UtilsTab:Slider({
 	Title = "WalkSpeed",
@@ -98,11 +97,7 @@ UtilsTab:Toggle({
 		if ok and char then
 			local humanoid = char:FindFirstChildOfClass("Humanoid")
 			if humanoid then
-				if state then
-					humanoid.WalkSpeed = wsSpeed
-				else
-					humanoid.WalkSpeed = 16
-				end
+				humanoid.WalkSpeed = state and wsSpeed or 16
 			end
 		end
 	end,
@@ -133,7 +128,6 @@ end)
 
 local flyEnabled = false
 local flySpeed = 50
-local flyBV, flyBG
 local flyConn
 
 UtilsTab:Slider({
@@ -150,40 +144,22 @@ UtilsTab:Slider({
 })
 
 local function startFly()
-	local ok, char = pcall(function()
-		return LocalPlayer.Character
-	end)
-	if not ok or not char then return end
-	local hrp = char:FindFirstChild("HumanoidRootPart")
-	local humanoid = char:FindFirstChildOfClass("Humanoid")
-	if not hrp or not humanoid then return end
+	if flyConn then flyConn:Disconnect() flyConn = nil end
 
-	humanoid.PlatformStand = true
-
-	flyBV = Instance.new("BodyVelocity")
-	flyBV.Name = "FlyForce"
-	flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-	flyBV.Velocity = Vector3.zero
-	flyBV.P = 1e4
-	flyBV.Parent = hrp
-
-	flyBG = Instance.new("BodyGyro")
-	flyBG.Name = "FlyGyro"
-	flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-	flyBG.P = 2e4
-	flyBG.D = 1000
-	flyBG.Parent = hrp
-
-	flyConn = RunService.Heartbeat:Connect(function()
+	flyConn = RunService.RenderStepped:Connect(function(dt)
 		if not flyEnabled then return end
-		local ok2, char2 = pcall(function()
+		local ok, char = pcall(function()
 			return LocalPlayer.Character
 		end)
-		if not ok2 or not char2 then return end
-		local hrp2 = char2:FindFirstChild("HumanoidRootPart")
-		local cam = workspace.CurrentCamera
-		if not hrp2 or not cam or not flyBV or not flyBG then return end
+		if not ok or not char then return end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		local humanoid = char:FindFirstChildOfClass("Humanoid")
+		if not hrp or not humanoid then return end
 
+		humanoid.PlatformStand = true
+
+		local cam = workspace.CurrentCamera
+		if not cam then return end
 		local camCF = cam.CFrame
 		local dir = Vector3.zero
 
@@ -208,17 +184,16 @@ local function startFly()
 
 		if dir.Magnitude > 0 then
 			dir = dir.Unit
+			hrp.CFrame = hrp.CFrame + dir * flySpeed * dt
 		end
 
-		flyBV.Velocity = dir * flySpeed
-		flyBG.CFrame = camCF
+		hrp.Velocity = Vector3.zero
+		hrp.RotVelocity = Vector3.zero
 	end)
 end
 
 local function stopFly()
 	if flyConn then flyConn:Disconnect() flyConn = nil end
-	if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
-	if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
 
 	local ok, char = pcall(function()
 		return LocalPlayer.Character
@@ -250,22 +225,17 @@ UtilsTab:Toggle({
 	end,
 })
 
-LocalPlayer.CharacterAdded:Connect(function()
-	if flyEnabled then
-		task.wait(0.5)
-		startFly()
-	end
+LocalPlayer.CharacterAdded:Connect(function(char)
 	if wsEnabled then
-		task.wait(0.5)
-		local ok, char = pcall(function()
-			return LocalPlayer.Character
-		end)
-		if ok and char then
-			local humanoid = char:FindFirstChildOfClass("Humanoid")
-			if humanoid then
-				humanoid.WalkSpeed = wsSpeed
-			end
+		task.wait(0.3)
+		local humanoid = char:WaitForChild("Humanoid", 3)
+		if humanoid then
+			humanoid.WalkSpeed = wsSpeed
 		end
+	end
+	if flyEnabled then
+		task.wait(0.3)
+		startFly()
 	end
 end)
 
@@ -309,6 +279,6 @@ else
 	HubsTab:Button({
 		Title = "No scripts found",
 		Desc = "Add scripts to loadstrings.lua",
-		Locked = true,
+		Locked = "Locked",
 	})
 end
