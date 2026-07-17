@@ -1,4 +1,6 @@
+print("[Hub] Starting...")
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+print("[Hub] WindUI loaded")
 
 local REPO_URL = "https://raw.githubusercontent.com/levox00/RobloxHub/main"
 
