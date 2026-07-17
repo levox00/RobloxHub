@@ -24,6 +24,8 @@ local Window = WindUI:CreateWindow({
 	},
 })
 
+Window:DisableTopbarButtons({ "Minimize" })
+
 local MainTab = Window:Tab({
 	Title = "Main",
 	Icon = "home",
