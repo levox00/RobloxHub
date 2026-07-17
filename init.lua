@@ -61,6 +61,11 @@ pcall(function()
 	Window:DisableTopbarButtons({ "Minimize" })
 end)
 
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
 local UtilsTab = Window:Tab({
 	Title = "Utils",
 	Icon = "solar:settings-bold",
@@ -68,6 +73,7 @@ local UtilsTab = Window:Tab({
 
 local wsEnabled = false
 local wsSpeed = 16
+local wsConn
 
 UtilsTab:Slider({
 	Title = "WalkSpeed",
@@ -86,6 +92,19 @@ UtilsTab:Toggle({
 	Title = "Enable WalkSpeed",
 	Callback = function(state)
 		wsEnabled = state
+		local ok, char = pcall(function()
+			return LocalPlayer.Character
+		end)
+		if ok and char then
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				if state then
+					humanoid.WalkSpeed = wsSpeed
+				else
+					humanoid.WalkSpeed = 16
+				end
+			end
+		end
 	end,
 })
 
@@ -99,12 +118,10 @@ UtilsTab:Toggle({
 	end,
 })
 
-local UIS = game:GetService("UserInputService")
-
 UIS.JumpRequest:Connect(function()
 	if not airJumpEnabled then return end
 	local ok, char = pcall(function()
-		return game.Players.LocalPlayer.Character
+		return LocalPlayer.Character
 	end)
 	if ok and char then
 		local humanoid = char:FindFirstChildOfClass("Humanoid")
@@ -117,6 +134,7 @@ end)
 local flyEnabled = false
 local flySpeed = 50
 local flyBV, flyBG
+local flyConn
 
 UtilsTab:Slider({
 	Title = "Fly Speed",
@@ -131,105 +149,121 @@ UtilsTab:Slider({
 	end,
 })
 
+local function startFly()
+	local ok, char = pcall(function()
+		return LocalPlayer.Character
+	end)
+	if not ok or not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not humanoid then return end
+
+	humanoid.PlatformStand = true
+
+	flyBV = Instance.new("BodyVelocity")
+	flyBV.Name = "FlyForce"
+	flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+	flyBV.Velocity = Vector3.zero
+	flyBV.P = 1e4
+	flyBV.Parent = hrp
+
+	flyBG = Instance.new("BodyGyro")
+	flyBG.Name = "FlyGyro"
+	flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+	flyBG.P = 2e4
+	flyBG.D = 1000
+	flyBG.Parent = hrp
+
+	flyConn = RunService.Heartbeat:Connect(function()
+		if not flyEnabled then return end
+		local ok2, char2 = pcall(function()
+			return LocalPlayer.Character
+		end)
+		if not ok2 or not char2 then return end
+		local hrp2 = char2:FindFirstChild("HumanoidRootPart")
+		local cam = workspace.CurrentCamera
+		if not hrp2 or not cam or not flyBV or not flyBG then return end
+
+		local camCF = cam.CFrame
+		local dir = Vector3.zero
+
+		if UIS:IsKeyDown(Enum.KeyCode.W) then
+			dir = dir + camCF.LookVector
+		end
+		if UIS:IsKeyDown(Enum.KeyCode.S) then
+			dir = dir - camCF.LookVector
+		end
+		if UIS:IsKeyDown(Enum.KeyCode.A) then
+			dir = dir - camCF.RightVector
+		end
+		if UIS:IsKeyDown(Enum.KeyCode.D) then
+			dir = dir + camCF.RightVector
+		end
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then
+			dir = dir + Vector3.new(0, 1, 0)
+		end
+		if UIS:IsKeyDown(Enum.KeyCode.Q) then
+			dir = dir - Vector3.new(0, 1, 0)
+		end
+
+		if dir.Magnitude > 0 then
+			dir = dir.Unit
+		end
+
+		flyBV.Velocity = dir * flySpeed
+		flyBG.CFrame = camCF
+	end)
+end
+
+local function stopFly()
+	if flyConn then flyConn:Disconnect() flyConn = nil end
+	if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
+	if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
+
+	local ok, char = pcall(function()
+		return LocalPlayer.Character
+	end)
+	if ok and char then
+		local humanoid = char:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.PlatformStand = false
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			hrp.Velocity = Vector3.zero
+			hrp.RotVelocity = Vector3.zero
+		end
+	end
+end
+
 UtilsTab:Toggle({
 	Title = "Fly",
-	Desc = "Press E to fly, Q to go down",
+	Desc = "WASD + Space/Q",
 	Callback = function(state)
 		flyEnabled = state
-		local ok, char = pcall(function()
-			return game.Players.LocalPlayer.Character
-		end)
-		if not ok or not char then return end
-		local hrp = char:FindFirstChild("HumanoidRootPart")
-		if not hrp then return end
-
 		if state then
-			flyBV = Instance.new("BodyVelocity")
-			flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-			flyBV.Velocity = Vector3.zero
-			flyBV.Parent = hrp
-
-			flyBG = Instance.new("BodyGyro")
-			flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-			flyBG.P = 9e4
-			flyBG.Parent = hrp
+			startFly()
 		else
-			if flyBV then flyBV:Destroy() flyBV = nil end
-			if flyBG then flyBG:Destroy() flyBG = nil end
+			stopFly()
 		end
 	end,
 })
 
-UIS.InputBegan:Connect(function(input, gpe)
-	if gpe or not flyEnabled then return end
-	if input.KeyCode == Enum.KeyCode.E then
-		local ok, char = pcall(function()
-			return game.Players.LocalPlayer.Character
-		end)
-		if ok and char then
-			local humanoid = char:FindFirstChildOfClass("Humanoid")
-			if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
-		end
+LocalPlayer.CharacterAdded:Connect(function()
+	if flyEnabled then
+		task.wait(0.5)
+		startFly()
 	end
-end)
-
-task.spawn(function()
-	while task.wait() do
-		if flyEnabled then
-			local ok, char = pcall(function()
-				return game.Players.LocalPlayer.Character
-			end)
-			if ok and char then
-				local hrp = char:FindFirstChild("HumanoidRootPart")
-				local cam = workspace.CurrentCamera
-				if hrp and cam and flyBV and flyBG then
-					local camCF = cam.CFrame
-					local direction = Vector3.zero
-
-					if UIS:IsKeyDown(Enum.KeyCode.W) then
-						direction = direction + camCF.LookVector
-					end
-					if UIS:IsKeyDown(Enum.KeyCode.S) then
-						direction = direction - camCF.LookVector
-					end
-					if UIS:IsKeyDown(Enum.KeyCode.A) then
-						direction = direction - camCF.RightVector
-					end
-					if UIS:IsKeyDown(Enum.KeyCode.D) then
-						direction = direction + camCF.RightVector
-					end
-					if UIS:IsKeyDown(Enum.KeyCode.Space) then
-						direction = direction + Vector3.new(0, 1, 0)
-					end
-					if UIS:IsKeyDown(Enum.KeyCode.Q) then
-						direction = direction - Vector3.new(0, 1, 0)
-					end
-
-					if direction.Magnitude > 0 then
-						direction = direction.Unit
-					end
-
-					flyBV.Velocity = direction * flySpeed
-					flyBG.CFrame = camCF
-				end
-			end
-		end
-	end
-end)
-
-task.spawn(function()
-	while task.wait(0.1) do
+	if wsEnabled then
+		task.wait(0.5)
 		local ok, char = pcall(function()
-			return game.Players.LocalPlayer.Character
+			return LocalPlayer.Character
 		end)
 		if ok and char then
 			local humanoid = char:FindFirstChildOfClass("Humanoid")
 			if humanoid then
-				if wsEnabled then
-					humanoid.WalkSpeed = wsSpeed
-				else
-					humanoid.WalkSpeed = 16
-				end
+				humanoid.WalkSpeed = wsSpeed
 			end
 		end
 	end
