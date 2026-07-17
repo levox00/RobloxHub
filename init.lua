@@ -2,6 +2,17 @@ print("[Hub] Starting...")
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 print("[Hub] WindUI loaded")
 
+WindUI:AddTheme({
+	Name = "Moon",
+	Accent = Color3.fromHex("#0f172a"),
+	Background = Color3.fromHex("#020617"),
+	Outline = Color3.fromHex("#94a3b8"),
+	Text = Color3.fromHex("#e2e8f0"),
+	Placeholder = Color3.fromHex("#64748b"),
+	Button = Color3.fromHex("#1e293b"),
+	Icon = Color3.fromHex("#cbd5e1"),
+})
+
 local REPO_URL = "https://raw.githubusercontent.com/levox00/RobloxHub/main"
 
 print("[Hub] Creating window...")
@@ -11,7 +22,7 @@ local success, Window = pcall(function()
 		Icon = "door-open",
 		Folder = "MyHub",
 		Size = UDim2.fromOffset(580, 460),
-		Theme = "Dark",
+		Theme = "Moon",
 		OpenButton = {
 			Title = "Open Hub",
 			CornerRadius = UDim.new(1, 0),
@@ -19,10 +30,10 @@ local success, Window = pcall(function()
 			Enabled = true,
 			Draggable = true,
 			Scale = 0.5,
-			Color = ColorSequence.new(
-				Color3.fromHex("#30FF6A"),
-				Color3.fromHex("#e7ff2f")
-			),
+		Color = ColorSequence.new(
+			Color3.fromHex("#60a5fa"),
+			Color3.fromHex("#c4b5fd")
+		),
 		},
 	})
 end)
@@ -46,7 +57,7 @@ local MainTab = Window:Tab({
 MainTab:Button({
 	Title = "Start Loading",
 	Desc = "Click to run the loading screen",
-	Color = Color3.fromHex("#305dff"),
+	Color = Color3.fromHex("#60a5fa"),
 	Callback = function()
 		local Loading = Window:Loading({
 			Title = "Loading...",
