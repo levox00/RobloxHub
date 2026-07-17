@@ -4,13 +4,25 @@ print("[Hub] WindUI loaded")
 
 WindUI:AddTheme({
 	Name = "Moon",
-	Accent = Color3.fromHex("#0f172a"),
-	Background = Color3.fromHex("#020617"),
-	Outline = Color3.fromHex("#94a3b8"),
-	Text = Color3.fromHex("#e2e8f0"),
-	Placeholder = Color3.fromHex("#64748b"),
-	Button = Color3.fromHex("#1e293b"),
-	Icon = Color3.fromHex("#cbd5e1"),
+	Accent = Color3.fromHex("#0c1445"),
+	Dialog = Color3.fromHex("#070d33"),
+	Outline = Color3.fromHex("#b0c4de"),
+	Text = Color3.fromHex("#dce4f0"),
+	Placeholder = Color3.fromHex("#6878a0"),
+	Background = Color3.fromHex("#050a1a"),
+	Button = Color3.fromHex("#1a2a5e"),
+	Icon = Color3.fromHex("#8fa8cc"),
+	Toggle = Color3.fromHex("#6fa8dc"),
+	Slider = Color3.fromHex("#5b8ec9"),
+	Checkbox = Color3.fromHex("#6fa8dc"),
+	PanelBackground = Color3.fromHex("#0e1a3a"),
+	PanelBackgroundTransparency = 0.1,
+	SliderIcon = Color3.fromHex("#7b9ec9"),
+	Primary = Color3.fromHex("#4a7ab5"),
+	LabelBackground = Color3.fromHex("#080e28"),
+	LabelBackgroundTransparency = 0.5,
+	ElementBackground = Color3.fromHex("#0f1c40"),
+	ElementBackgroundTransparency = 0,
 })
 
 local REPO_URL = "https://raw.githubusercontent.com/levox00/RobloxHub/main"
@@ -31,8 +43,8 @@ local success, Window = pcall(function()
 			Draggable = true,
 			Scale = 0.5,
 		Color = ColorSequence.new(
-			Color3.fromHex("#60a5fa"),
-			Color3.fromHex("#c4b5fd")
+			Color3.fromHex("#4a7ab5"),
+			Color3.fromHex("#8fa8cc")
 		),
 		},
 	})
