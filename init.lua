@@ -25,7 +25,7 @@ WindUI:AddTheme({
 	ElementBackgroundTransparency = 0,
 })
 
-local REPO_URL = "https://raw.githubusercontent.com/levox00/RobloxHub/game/grow-a-garden-2"
+local REPO_URL = "https://raw.githubusercontent.com/levox00/RobloxHub/main"
 
 print("[Hub] Creating window...")
 local success, Window = pcall(function()
