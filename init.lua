@@ -89,6 +89,31 @@ UtilsTab:Toggle({
 	end,
 })
 
+local airJumpEnabled = false
+
+UtilsTab:Toggle({
+	Title = "Air Jump",
+	Desc = "Jump in mid-air",
+	Callback = function(state)
+		airJumpEnabled = state
+	end,
+})
+
+local UIS = game:GetService("UserInputService")
+
+UIS.JumpRequest:Connect(function()
+	if not airJumpEnabled then return end
+	local ok, char = pcall(function()
+		return game.Players.LocalPlayer.Character
+	end)
+	if ok and char then
+		local humanoid = char:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.FloorMaterial == Enum.Material.Air then
+			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+	end
+end)
+
 task.spawn(function()
 	while task.wait(0.1) do
 		local ok, char = pcall(function()
