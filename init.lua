@@ -20,10 +20,6 @@ local Window = WindUI:CreateWindow({
 			Color3.fromHex("#e7ff2f")
 		),
 	},
-	Topbar = {
-		Height = 44,
-	},
-	DisableTopbarButtons = { "Minimize" },
 })
 
 local MainTab = Window:Tab({
