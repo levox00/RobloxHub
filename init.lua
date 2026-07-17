@@ -57,6 +57,12 @@ end
 
 print("[Hub] Window created!")
 
+-- Expose to game modules
+getgenv().PussyHub_Window = Window
+getgenv().PussyHub_WindUI = WindUI
+
+-- Add a Game Tabs overview
+
 pcall(function()
 	Window:DisableTopbarButtons({ "Minimize" })
 end)
@@ -66,6 +72,53 @@ local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
+------------------------------------------------------------------------
+-- Games tab: loads each game module into the hub WindUI
+------------------------------------------------------------------------
+local GamesTab = Window:Tab({
+	Title = "Games",
+	Icon = "solar:gamepad-bold",
+})
+
+local gameModules = {
+	{ Name = "Grow a Garden 2", File = "GrowAGarden2.lua", Color = Color3.fromRGB(0, 229, 255) },
+	{ Name = "Adopt Me",        File = "AdoptMe.lua",     Color = Color3.fromRGB(236, 72, 153) },
+	{ Name = "Blox Fruits",     File = "BloxFruits.lua",  Color = Color3.fromRGB(239, 68, 68) },
+	{ Name = "Jailbreak",       File = "Jailbreak.lua",   Color = Color3.fromRGB(59, 130, 246) },
+}
+
+for _, entry in ipairs(gameModules) do
+	GamesTab:Button({
+		Title = entry.Name,
+		Justify = "Center",
+		Color = entry.Color,
+		Callback = function()
+			local ok, err = pcall(function()
+				local code = game:HttpGet(REPO_URL .. "/Games/" .. entry.File .. cacheBuster)
+				getgenv().PussyHub_Window = Window
+				getgenv().PussyHub_WindUI = WindUI
+				loadstring(code)()
+			end)
+			if ok then
+				WindUI:Notify({
+					Title = entry.Name,
+					Content = "Loaded into hub!",
+					Duration = 3,
+				})
+			else
+				WindUI:Notify({
+					Title = "Error",
+					Content = "Failed: " .. tostring(err),
+					Duration = 5,
+				})
+			end
+		end,
+	})
+end
+
+------------------------------------------------------------------------
+-- Utils tab
+------------------------------------------------------------------------
 local UtilsTab = Window:Tab({
 	Title = "Utils",
 	Icon = "solar:settings-bold",
