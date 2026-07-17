@@ -5,25 +5,34 @@ print("[Hub] WindUI loaded")
 local REPO_URL = "https://raw.githubusercontent.com/levox00/RobloxHub/main"
 
 print("[Hub] Creating window...")
-local Window = WindUI:CreateWindow({
-	Title = "My Hub",
-	Icon = "door-open",
-	Folder = "MyHub",
-	Size = UDim2.fromOffset(580, 460),
-	Theme = "Dark",
-	OpenButton = {
-		Title = "Open Hub",
-		CornerRadius = UDim.new(1, 0),
-		StrokeThickness = 3,
-		Enabled = true,
-		Draggable = true,
-		Scale = 0.5,
-		Color = ColorSequence.new(
-			Color3.fromHex("#30FF6A"),
-			Color3.fromHex("#e7ff2f")
-		),
-	},
-})
+local success, Window = pcall(function()
+	return WindUI:CreateWindow({
+		Title = "My Hub",
+		Icon = "door-open",
+		Folder = "MyHub",
+		Size = UDim2.fromOffset(580, 460),
+		Theme = "Dark",
+		OpenButton = {
+			Title = "Open Hub",
+			CornerRadius = UDim.new(1, 0),
+			StrokeThickness = 3,
+			Enabled = true,
+			Draggable = true,
+			Scale = 0.5,
+			Color = ColorSequence.new(
+				Color3.fromHex("#30FF6A"),
+				Color3.fromHex("#e7ff2f")
+			),
+		},
+	})
+end)
+
+if not success then
+	warn("[Hub] CreateWindow FAILED:", Window)
+	return
+end
+
+print("[Hub] Window created!")
 
 pcall(function()
 	Window:DisableTopbarButtons({ "Minimize" })
@@ -74,20 +83,20 @@ local HubsTab = Window:Tab({
 
 local cacheBuster = "?v=" .. math.random(1, 999999)
 
-local success, scriptsList = pcall(function()
+local loadSuccess, scriptsList = pcall(function()
 	return loadstring(game:HttpGet(REPO_URL .. "/loadstrings.lua" .. cacheBuster))()
 end)
 
-if success and scriptsList then
+if loadSuccess and scriptsList then
 	for _, scriptEntry in ipairs(scriptsList) do
 		HubsTab:Button({
 			Title = scriptEntry.Name,
 			Justify = "Center",
 			Callback = function()
-				local loadSuccess, loadErr = pcall(function()
+				local ok, err = pcall(function()
 					loadstring(game:HttpGet(scriptEntry.Url .. cacheBuster))()
 				end)
-				if loadSuccess then
+				if ok then
 					WindUI:Notify({
 						Title = scriptEntry.Name,
 						Content = "Loaded successfully!",
@@ -96,7 +105,7 @@ if success and scriptsList then
 				else
 					WindUI:Notify({
 						Title = "Error",
-						Content = "Failed to load: " .. tostring(loadErr),
+						Content = "Failed to load: " .. tostring(err),
 						Duration = 5,
 					})
 				end
