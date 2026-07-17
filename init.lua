@@ -274,10 +274,11 @@ local HubsTab = Window:Tab({
 	Icon = "solar:folder-with-files-bold",
 })
 
+local REPO_BRANCH = "game/gag2-hub-integration"
 local cacheBuster = "?v=" .. math.random(1, 999999)
 
 local loadSuccess, scriptsList = pcall(function()
-	return loadstring(game:HttpGet(REPO_URL .. "/loadstrings.lua" .. cacheBuster))()
+	return loadstring(game:HttpGet("https://raw.githubusercontent.com/levox00/RobloxHub/" .. REPO_BRANCH .. "/loadstrings.lua" .. cacheBuster))()
 end)
 
 if loadSuccess and scriptsList then
