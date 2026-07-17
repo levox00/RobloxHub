@@ -20,20 +20,7 @@ local Window = WindUI:CreateWindow({
 			Color3.fromHex("#e7ff2f")
 		),
 	},
-	Topbar = {
-		Height = 44,
-		ButtonsType = "Mac",
-		DisableTopbarButtons = { "Close" },
-		CustomTopbarButtons = {
-			{
-				Title = "Close",
-				Icon = "x",
-				Callback = function()
-					Window:Destroy()
-				end,
-			},
-		},
-	},
+
 })
 
 local MainTab = Window:Tab({
@@ -87,7 +74,6 @@ if success and scriptsList then
 	for _, scriptEntry in ipairs(scriptsList) do
 		HubsTab:Button({
 			Title = scriptEntry.Name,
-			Desc = scriptEntry.Url,
 			Justify = "Center",
 			Callback = function()
 				local loadSuccess, loadErr = pcall(function()
