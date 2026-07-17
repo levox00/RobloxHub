@@ -4,6 +4,7 @@ print("[Hub] WindUI loaded")
 
 local REPO_URL = "https://raw.githubusercontent.com/levox00/RobloxHub/main"
 
+print("[Hub] Creating window...")
 local Window = WindUI:CreateWindow({
 	Title = "My Hub",
 	Icon = "door-open",
@@ -24,7 +25,9 @@ local Window = WindUI:CreateWindow({
 	},
 })
 
-Window:DisableTopbarButtons({ "Minimize" })
+pcall(function()
+	Window:DisableTopbarButtons({ "Minimize" })
+end)
 
 local MainTab = Window:Tab({
 	Title = "Main",
