@@ -66,8 +66,10 @@ local HubsTab = Window:Tab({
 	Icon = "solar:folder-with-files-bold",
 })
 
+local cacheBuster = "?t=" .. tick()
+
 local success, scriptsList = pcall(function()
-	return loadstring(game:HttpGet(REPO_URL .. "/loadstrings.lua"))()
+	return loadstring(game:HttpGet(REPO_URL .. "/loadstrings.lua" .. cacheBuster))()
 end)
 
 if success and scriptsList then
@@ -77,7 +79,7 @@ if success and scriptsList then
 			Justify = "Center",
 			Callback = function()
 				local loadSuccess, loadErr = pcall(function()
-					loadstring(game:HttpGet(scriptEntry.Url))()
+					loadstring(game:HttpGet(scriptEntry.Url .. cacheBuster))()
 				end)
 				if loadSuccess then
 					WindUI:Notify({
