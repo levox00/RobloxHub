@@ -1,1 +1,32 @@
+# Windows system files (never commit)
 *.winmd
+*.dll
+*.exe
+*.sys
+
+# OS metadata
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# Editors / scratch
+.vscode/
+*.swp
+*.tmp
+
+# Build artifacts
+*.compiled.json
+
+# Stale scanner logs / debug dumps
+*.txt.scan
+*_Scan_*.txt
+*_MsgDialog.txt
+*_SellScan.txt
+
+# Large offline docs
+apiDocumentation.html
+apiDocumentation_files/
+
+# Lua loadstring cache headers — never commit keys / bearer tokens
+*_SECRET.lua
+auth-secret.json
